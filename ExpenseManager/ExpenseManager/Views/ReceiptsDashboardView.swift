@@ -53,105 +53,103 @@ struct ReceiptsDashboardView: View {
 
     private var appBackground: some View {
         ZStack {
-            Color(.systemGroupedBackground)
-            LinearGradient(colors: [Color.blue.opacity(0.10), Color.purple.opacity(0.08), Color.orange.opacity(0.06)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Color(red: 0.98, green: 0.96, blue: 0.92)
+            LinearGradient(colors: [Color.orange.opacity(0.13), Color.purple.opacity(0.07), Color.blue.opacity(0.06)], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
         .ignoresSafeArea()
     }
 
     private var heroSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Smart receipt command center")
-                        .font(.largeTitle.weight(.black))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 34, weight: .semibold, design: .serif))
+                        .foregroundStyle(Color(red: 0.18, green: 0.13, blue: 0.09))
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("Scan bills, verify extracted totals, and keep spending cleanly organized in Supabase.")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.82))
+                    Text("Capture receipts, review extracted details, and keep spending organized with a calmer workflow.")
+                        .font(.system(.subheadline, design: .rounded).weight(.medium))
+                        .foregroundStyle(Color(red: 0.38, green: 0.31, blue: 0.25))
+                        .lineSpacing(3)
                 }
                 Spacer(minLength: 14)
                 Image(systemName: "receipt.fill")
-                    .font(.title.weight(.bold))
-                    .foregroundStyle(.white)
+                    .font(.title.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.53, green: 0.28, blue: 0.13))
                     .frame(width: 58, height: 58)
-                    .background(.white.opacity(0.18))
+                    .background(Color.white.opacity(0.68))
                     .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: .brown.opacity(0.10), radius: 12, y: 7)
             }
 
-            HStack(spacing: 12) {
-                Button {
-                    store.showScanner = true
-                } label: {
-                    Label("Scan now", systemImage: "viewfinder")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.white)
-                .foregroundStyle(.blue)
-
-                Button {
-                    store.showPhotoPicker = true
-                } label: {
-                    Label("Import", systemImage: "photo")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                }
-                .buttonStyle(.bordered)
-                .tint(.white)
-                .foregroundStyle(.white)
+            HStack(spacing: 8) {
+                Label("OCR ready", systemImage: "text.viewfinder")
+                Label("SGD default", systemImage: "dollarsign.circle")
+                Label("Card mapping", systemImage: "creditcard")
             }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color(red: 0.48, green: 0.30, blue: 0.18))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
         }
-        .padding(22)
+        .padding(24)
         .background(
             ZStack(alignment: .bottomTrailing) {
-                LinearGradient(colors: [Color(red: 0.05, green: 0.35, blue: 0.95), Color(red: 0.52, green: 0.22, blue: 0.96), Color(red: 0.96, green: 0.40, blue: 0.46)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                LinearGradient(colors: [Color(red: 1.00, green: 0.92, blue: 0.78), Color(red: 0.94, green: 0.83, blue: 0.70), Color(red: 0.88, green: 0.81, blue: 0.96)], startPoint: .topLeading, endPoint: .bottomTrailing)
                 Circle()
-                    .fill(.white.opacity(0.16))
-                    .frame(width: 180, height: 180)
-                    .offset(x: 70, y: 75)
+                    .fill(Color.white.opacity(0.35))
+                    .frame(width: 190, height: 190)
+                    .offset(x: 74, y: 82)
+                Circle()
+                    .stroke(Color.white.opacity(0.42), lineWidth: 1)
+                    .frame(width: 120, height: 120)
+                    .offset(x: -210, y: -54)
             }
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 34, style: .continuous)
+                .stroke(Color.white.opacity(0.54), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
-        .shadow(color: .purple.opacity(0.28), radius: 22, x: 0, y: 14)
+        .shadow(color: .brown.opacity(0.14), radius: 24, x: 0, y: 14)
     }
 
     private var statusBanner: some View {
         HStack(spacing: 12) {
             Image(systemName: store.isProcessing ? "hourglass" : "checkmark.seal.fill")
                 .font(.headline)
-                .foregroundStyle(store.isProcessing ? .orange : .green)
+                .foregroundStyle(store.isProcessing ? Color(red: 0.74, green: 0.42, blue: 0.18) : Color(red: 0.28, green: 0.54, blue: 0.38))
             if store.isProcessing {
                 ProgressView()
                     .controlSize(.small)
             }
             Text(store.statusMessage ?? "Ready to scan, import, review, and save receipts.")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
+                .font(.system(.subheadline, design: .rounded).weight(.medium))
+                .foregroundStyle(Color(red: 0.39, green: 0.33, blue: 0.28))
                 .lineLimit(2)
             Spacer()
         }
-        .padding(14)
-        .background(.regularMaterial)
+        .padding(15)
+        .background(Color(.systemBackground).opacity(0.74))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.62), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private var actionRail: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-            actionTile(title: "Scan", subtitle: "Open camera", icon: "camera.viewfinder", colors: [.green, .mint]) {
+            actionTile(title: "Scan", subtitle: "Open camera", icon: "camera.viewfinder", tint: Color(red: 0.28, green: 0.54, blue: 0.38)) {
                 store.showScanner = true
             }
-            actionTile(title: "Import", subtitle: "Choose image", icon: "photo.on.rectangle.angled", colors: [.blue, .cyan]) {
+            actionTile(title: "Import", subtitle: "Choose image", icon: "photo.on.rectangle.angled", tint: Color(red: 0.24, green: 0.43, blue: 0.68)) {
                 store.showPhotoPicker = true
             }
-            actionTile(title: "Report", subtitle: "View insights", icon: "chart.line.uptrend.xyaxis", colors: [.purple, .indigo]) {
+            actionTile(title: "Report", subtitle: "View insights", icon: "chart.line.uptrend.xyaxis", tint: Color(red: 0.48, green: 0.35, blue: 0.70)) {
                 onShowReport()
             }
-            actionTile(title: "Manage", subtitle: "Edit latest", icon: "square.and.pencil", colors: [.orange, .pink]) {
+            actionTile(title: "Manage", subtitle: "Edit latest", icon: "square.and.pencil", tint: Color(red: 0.72, green: 0.39, blue: 0.20)) {
                 if let first = store.recentInvoices.first {
                     store.editingInvoice = first
                 } else {
@@ -162,29 +160,34 @@ struct ReceiptsDashboardView: View {
         }
     }
 
-    private func actionTile(title: String, subtitle: String, icon: String, colors: [Color], action: @escaping () -> Void) -> some View {
+    private func actionTile(title: String, subtitle: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 13) {
                 Image(systemName: icon)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 46, height: 46)
-                    .background(.white.opacity(0.18))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 44, height: 44)
+                    .background(tint.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.headline)
+                        .font(.system(.headline, design: .rounded).weight(.semibold))
+                        .foregroundStyle(Color(red: 0.17, green: 0.13, blue: 0.10))
                     Text(subtitle)
                         .font(.caption.weight(.medium))
-                        .opacity(0.86)
+                        .foregroundStyle(.secondary)
                 }
-                .foregroundStyle(.white)
+                Spacer(minLength: 6)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing))
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .shadow(color: colors.first?.opacity(0.18) ?? .clear, radius: 12, y: 8)
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            .background(Color(.systemBackground).opacity(0.78))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(tint.opacity(0.16), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .shadow(color: tint.opacity(0.08), radius: 12, y: 8)
         }
         .buttonStyle(.plain)
     }
@@ -202,18 +205,23 @@ struct ReceiptsDashboardView: View {
             Image(systemName: icon)
                 .foregroundStyle(tint)
             Text(value)
-                .font(.headline.weight(.bold))
-                .minimumScaleFactor(0.65)
+                .font(.system(.headline, design: .rounded).weight(.bold))
+                .minimumScaleFactor(0.6)
                 .lineLimit(1)
+                .monospacedDigit()
             Text(title)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(Color(.systemBackground).opacity(0.94))
+        .background(Color(.systemBackground).opacity(0.78))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(tint.opacity(0.12), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: .black.opacity(0.04), radius: 10, y: 6)
+        .shadow(color: .brown.opacity(0.05), radius: 10, y: 6)
     }
 
     private var searchAndFilters: some View {
@@ -234,7 +242,11 @@ struct ReceiptsDashboardView: View {
                 }
             }
             .padding(14)
-            .background(Color(.systemBackground).opacity(0.94))
+            .background(Color(.systemBackground).opacity(0.78))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.white.opacity(0.66), lineWidth: 1)
+            )
             .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -247,8 +259,8 @@ struct ReceiptsDashboardView: View {
                                 .font(.caption.weight(.bold))
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 9)
-                                .background(store.selectedFilter == filter ? Color.blue.gradient : Color(.systemBackground).opacity(0.9).gradient)
-                                .foregroundStyle(store.selectedFilter == filter ? .white : .primary)
+                                .background(store.selectedFilter == filter ? Color(red: 0.53, green: 0.28, blue: 0.13).gradient : Color(.systemBackground).opacity(0.74).gradient)
+                                .foregroundStyle(store.selectedFilter == filter ? .white : Color(red: 0.24, green: 0.18, blue: 0.14))
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
@@ -296,9 +308,13 @@ struct ReceiptsDashboardView: View {
             }
         }
         .padding()
-        .background(.regularMaterial)
+        .background(Color(.systemBackground).opacity(0.72))
+        .overlay(
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .stroke(Color.white.opacity(0.62), lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .shadow(color: .black.opacity(0.05), radius: 14, y: 10)
+        .shadow(color: .brown.opacity(0.07), radius: 14, y: 10)
     }
 
     private var emptyState: some View {
