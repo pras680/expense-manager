@@ -6,6 +6,7 @@ struct ReceiptEditorView: View {
     @State private var date: Date
     @State private var totalText: String
     @State private var currency: String
+    @State private var category: String
     @State private var rawText: String
 
     let invoice: Invoice
@@ -19,7 +20,8 @@ struct ReceiptEditorView: View {
         _merchant = State(initialValue: invoice.merchant ?? "")
         _date = State(initialValue: invoice.date ?? Date())
         _totalText = State(initialValue: invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? "")
-        _currency = State(initialValue: invoice.currency ?? "USD")
+        _currency = State(initialValue: invoice.currency ?? Invoice.defaultCurrency)
+        _category = State(initialValue: invoice.category ?? "Miscellaneous")
         _rawText = State(initialValue: invoice.rawText)
     }
 
@@ -80,10 +82,28 @@ struct ReceiptEditorView: View {
             HStack(spacing: 12) {
                 styledTextField("Total", text: $totalText, icon: "dollarsign.circle")
                     .keyboardType(.decimalPad)
-                styledTextField("USD", text: $currency, icon: "globe")
-                    .frame(width: 130)
-                    .textInputAutocapitalization(.characters)
+                Picker("Currency", selection: $currency) {
+                    ForEach(Invoice.commonCurrencies, id: \.self) { currency in
+                        Text(currency).tag(currency)
+                    }
+                }
+                .pickerStyle(.menu)
+                .padding(14)
+                .frame(width: 130, alignment: .leading)
+                .background(Color(.systemBackground).opacity(0.94))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
+
+            Picker("Category", selection: $category) {
+                ForEach(Invoice.expenseCategories, id: \.self) { category in
+                    Text(category).tag(category)
+                }
+            }
+            .pickerStyle(.menu)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.systemBackground).opacity(0.94))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .padding()
         .background(.regularMaterial)
@@ -111,6 +131,7 @@ struct ReceiptEditorView: View {
             updated.merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
             updated.date = date
             updated.currency = currency.trimmingCharacters(in: .whitespacesAndNewlines)
+            updated.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
             updated.rawText = rawText
             updated.total = Decimal(string: totalText.replacingOccurrences(of: ",", with: "")) ?? updated.total
             onSave(updated)

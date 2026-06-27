@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import PhotosUI
 import SwiftUI
 import UIKit
@@ -212,9 +213,9 @@ class ReceiptStore: ObservableObject {
                 merchant: fallbackInvoice.merchant,
                 date: fallbackInvoice.date.map { ISO8601DateFormatter().string(from: $0) },
                 total: fallbackInvoice.total,
-                currency: fallbackInvoice.currency ?? "USD",
+                currency: fallbackInvoice.currency ?? Invoice.defaultCurrency,
                 extracted_digits: nil,
-                category: nil,
+                category: fallbackInvoice.category,
                 line_items: nil
             )
             statusMessage = "Cloud parsing unavailable; using on-device extraction."
@@ -222,7 +223,7 @@ class ReceiptStore: ObservableObject {
         }
 
         var invoice = Invoice(from: parsed, rawText: rawText)
-        invoice.currency = parsed.currency ?? "USD"
+        invoice.currency = parsed.currency ?? Invoice.defaultCurrency
 
         enqueuePendingReceipt(invoice: invoice, imageData: imageData)
         statusMessage = "Receipt extracted — review and approve before saving."
@@ -288,7 +289,7 @@ class ReceiptStore: ObservableObject {
                 total: invoice.total,
                 currency: invoice.currency,
                 extracted_digits: nil,
-                category: nil,
+                category: invoice.category,
                 line_items: nil
             ), rawText: invoice.rawText, fileUrl: fileUrl)
 
@@ -321,7 +322,8 @@ class ReceiptStore: ObservableObject {
                 merchant: invoice.merchant,
                 date: invoice.date,
                 total: invoice.total,
-                currency: invoice.currency
+                currency: invoice.currency,
+                category: invoice.category
             )
             if let index = invoices.firstIndex(where: { $0.id == invoice.id }) {
                 invoices[index] = invoice

@@ -112,7 +112,7 @@ actor SupabaseService {
         return rows.compactMap { Invoice(from: $0) }
     }
 
-    func updateReceipt(id: UUID, merchant: String?, date: Date?, total: Decimal?, currency: String?) async throws {
+    func updateReceipt(id: UUID, merchant: String?, date: Date?, total: Decimal?, currency: String?, category: String?) async throws {
         guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/receipts"), resolvingAgainstBaseURL: false) else {
             throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL for receipt update"])
         }
@@ -130,6 +130,7 @@ actor SupabaseService {
         body["date"] = date.map { ISO8601DateFormatter().string(from: $0) }
         body["total"] = total.map { NSDecimalNumber(decimal: $0) }
         body["currency"] = currency as Any
+        body["category"] = category as Any
 
         req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
         let (_, response) = try await URLSession.shared.data(for: req)
@@ -169,6 +170,7 @@ actor SupabaseService {
             "date": parsed.date as Any,
             "total": parsed.total.map { NSDecimalNumber(decimal: $0) } as Any,
             "currency": parsed.currency as Any,
+            "category": parsed.category as Any,
             "file_url": fileUrl as Any,
             "raw_ocr_json": [
                 "raw_text": rawText ?? "",

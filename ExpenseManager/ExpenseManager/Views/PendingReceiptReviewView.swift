@@ -8,7 +8,8 @@ struct PendingReceiptReviewView: View {
     @State private var merchant: String = ""
     @State private var date: Date = Date()
     @State private var total: String = ""
-    @State private var currency: String = "USD"
+    @State private var currency: String = Invoice.defaultCurrency
+    @State private var category: String = "Miscellaneous"
     @State private var rawText: String = ""
 
     var body: some View {
@@ -38,7 +39,8 @@ struct PendingReceiptReviewView: View {
                 merchant = pending.invoice.merchant ?? ""
                 date = pending.invoice.date ?? Date()
                 total = pending.invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
-                currency = pending.invoice.currency ?? "USD"
+                currency = pending.invoice.currency ?? Invoice.defaultCurrency
+                category = pending.invoice.category ?? "Miscellaneous"
                 rawText = pending.invoice.rawText
             }
         }
@@ -64,6 +66,7 @@ struct PendingReceiptReviewView: View {
         HStack(spacing: 12) {
             summaryPill(title: "Merchant", value: merchant.isEmpty ? "Missing" : merchant, tint: .blue)
             summaryPill(title: "Total", value: total.isEmpty ? "Missing" : total, tint: .green)
+            summaryPill(title: "Category", value: category.isEmpty ? "Missing" : category, tint: .purple)
         }
     }
 
@@ -96,10 +99,28 @@ struct PendingReceiptReviewView: View {
             HStack(spacing: 12) {
                 styledTextField("Total", text: $total, icon: "dollarsign.circle")
                     .keyboardType(.decimalPad)
-                styledTextField("USD", text: $currency, icon: "globe")
-                    .frame(width: 128)
-                    .textInputAutocapitalization(.characters)
+                Picker("Currency", selection: $currency) {
+                    ForEach(Invoice.commonCurrencies, id: \.self) { currency in
+                        Text(currency).tag(currency)
+                    }
+                }
+                .pickerStyle(.menu)
+                .padding(14)
+                .frame(width: 128, alignment: .leading)
+                .background(Color(.systemBackground).opacity(0.94))
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
+
+            Picker("Category", selection: $category) {
+                ForEach(Invoice.expenseCategories, id: \.self) { category in
+                    Text(category).tag(category)
+                }
+            }
+            .pickerStyle(.menu)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.systemBackground).opacity(0.94))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .padding()
         .background(.regularMaterial)
@@ -150,6 +171,7 @@ struct PendingReceiptReviewView: View {
         invoice.date = date
         invoice.total = Decimal(string: total.replacingOccurrences(of: ",", with: ""))
         invoice.currency = currency.trimmingCharacters(in: .whitespacesAndNewlines)
+        invoice.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
         invoice.rawText = rawText
         Task {
             await onConfirm(invoice)

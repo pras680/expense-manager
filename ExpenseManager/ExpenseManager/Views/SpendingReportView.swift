@@ -72,7 +72,7 @@ struct SpendingReportView: View {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .foregroundColor(.secondary)
-            Text(value.formatted(.currency(code: "USD")))
+            Text(value.formatted(.currency(code: Invoice.defaultCurrency)))
                 .font(.title3.weight(.bold))
                 .foregroundColor(color)
         }
@@ -95,7 +95,7 @@ struct SpendingReportView: View {
                     ForEach(Array(store.weeklySpendByDay.enumerated()), id: \.offset) { item in
                         let bar = item.element
                         VStack(spacing: 8) {
-                            Text(bar.amount.formatted(.currency(code: "USD")))
+                            Text(bar.amount.formatted(.currency(code: Invoice.defaultCurrency)))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
@@ -153,9 +153,12 @@ struct SpendingReportView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
+                        Label(invoice.category ?? "Miscellaneous", systemImage: "tag.fill")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(.purple)
                     }
                     Spacer()
-                    Text(invoice.total.map { $0.formatted(.currency(code: invoice.currency ?? "USD")) } ?? "—")
+                    Text(invoice.total.map { $0.formatted(.currency(code: invoice.currency ?? Invoice.defaultCurrency)) } ?? "—")
                         .font(.subheadline.bold())
                 }
                 .padding()

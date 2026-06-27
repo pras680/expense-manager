@@ -191,8 +191,8 @@ struct ReceiptsDashboardView: View {
 
     private var metricsStrip: some View {
         HStack(spacing: 12) {
-            metricPill(title: "Total", value: store.totalSpend.formatted(.currency(code: "USD")), icon: "creditcard.fill", tint: .blue)
-            metricPill(title: "Month", value: store.monthlySpend.formatted(.currency(code: "USD")), icon: "calendar.badge.clock", tint: .purple)
+            metricPill(title: "Total", value: store.totalSpend.formatted(.currency(code: Invoice.defaultCurrency)), icon: "creditcard.fill", tint: .blue)
+            metricPill(title: "Month", value: store.monthlySpend.formatted(.currency(code: Invoice.defaultCurrency)), icon: "calendar.badge.clock", tint: .purple)
             metricPill(title: "Count", value: "\(store.receiptCount)", icon: "tray.full.fill", tint: .orange)
         }
     }
@@ -349,9 +349,16 @@ private struct ReceiptRow: View {
                     Text(invoice.date.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .none) } ?? "No date")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Label(invoice.category ?? "Miscellaneous", systemImage: "tag.fill")
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color.purple.opacity(0.12))
+                        .foregroundStyle(.purple)
+                        .clipShape(Capsule())
                 }
                 Spacer()
-                Text(invoice.total.map { $0.formatted(.currency(code: invoice.currency ?? "USD")) } ?? "—")
+                Text(invoice.total.map { $0.formatted(.currency(code: invoice.currency ?? Invoice.defaultCurrency)) } ?? "—")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
