@@ -1,0 +1,9 @@
+{
+  "name": "parse-receipt",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "deploy": "supabase functions deploy parse-receipt --no-verify"
+  },
+  "dependencies": {}
+}
