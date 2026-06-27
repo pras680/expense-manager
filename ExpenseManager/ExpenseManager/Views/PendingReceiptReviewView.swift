@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct PendingReceiptReviewView: View {
+    @ObservedObject var store: ReceiptStore
     @Binding var pending: ReceiptStore.PendingReceipt?
     let onConfirm: (Invoice) async -> Void
     let onDiscard: () -> Void
@@ -10,6 +11,8 @@ struct PendingReceiptReviewView: View {
     @State private var total: String = ""
     @State private var currency: String = Invoice.defaultCurrency
     @State private var category: String = "Miscellaneous"
+    @State private var cardLast4: String = ""
+    @State private var cardBank: String = ""
     @State private var rawText: String = ""
 
     var body: some View {
@@ -41,6 +44,8 @@ struct PendingReceiptReviewView: View {
                 total = pending.invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
                 currency = pending.invoice.currency ?? Invoice.defaultCurrency
                 category = pending.invoice.category ?? "Miscellaneous"
+                cardLast4 = pending.invoice.cardLast4 ?? ""
+                cardBank = pending.invoice.cardBank ?? ""
                 rawText = pending.invoice.rawText
             }
         }
@@ -66,7 +71,7 @@ struct PendingReceiptReviewView: View {
         HStack(spacing: 12) {
             summaryPill(title: "Merchant", value: merchant.isEmpty ? "Missing" : merchant, tint: .blue)
             summaryPill(title: "Total", value: total.isEmpty ? "Missing" : total, tint: .green)
-            summaryPill(title: "Category", value: category.isEmpty ? "Missing" : category, tint: .purple)
+            summaryPill(title: "Card", value: cardSummary, tint: .orange)
         }
     }
 
@@ -121,6 +126,11 @@ struct PendingReceiptReviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.systemBackground).opacity(0.94))
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            HStack(spacing: 12) {
+                menuPicker(title: "Card last 4", selection: $cardLast4, options: store.availableCardLast4Options, icon: "creditcard")
+                menuPicker(title: "Card bank", selection: $cardBank, options: store.availableCardBankOptions, icon: "building.columns")
+            }
         }
         .padding()
         .background(.regularMaterial)
@@ -172,10 +182,23 @@ struct PendingReceiptReviewView: View {
         invoice.total = Decimal(string: total.replacingOccurrences(of: ",", with: ""))
         invoice.currency = currency.trimmingCharacters(in: .whitespacesAndNewlines)
         invoice.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        invoice.cardLast4 = PaymentMappingService.normalizedLast4(from: cardLast4)
+        invoice.cardBank = cardBank.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         invoice.rawText = rawText
         Task {
             await onConfirm(invoice)
         }
+    }
+
+    private var cardSummary: String {
+        if !cardBank.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !cardLast4.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "\(cardBank) •••• \(cardLast4)"
+        }
+        if !cardLast4.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "•••• \(cardLast4)"
+        }
+        return "Missing"
     }
 
     private func styledTextField(_ title: String, text: Binding<String>, icon: String) -> some View {
@@ -187,5 +210,32 @@ struct PendingReceiptReviewView: View {
         .padding(14)
         .background(Color(.systemBackground).opacity(0.94))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func menuPicker(title: String, selection: Binding<String>, options: [String], icon: String) -> some View {
+        let allOptions = Array(Set(options + (selection.wrappedValue.nilIfEmpty.map { [$0] } ?? []))).sorted()
+
+        return HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(.blue)
+            Picker(title, selection: selection) {
+                Text("Not selected").tag("")
+                ForEach(allOptions, id: \.self) { option in
+                    Text(option).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(Color(.systemBackground).opacity(0.94))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+}
+
+extension String {
+    var nilIfEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

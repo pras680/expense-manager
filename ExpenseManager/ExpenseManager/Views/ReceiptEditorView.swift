@@ -2,18 +2,22 @@ import SwiftUI
 
 struct ReceiptEditorView: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject var store: ReceiptStore
     @State private var merchant: String
     @State private var date: Date
     @State private var totalText: String
     @State private var currency: String
     @State private var category: String
+    @State private var cardLast4: String
+    @State private var cardBank: String
     @State private var rawText: String
 
     let invoice: Invoice
     let onSave: (Invoice) -> Void
     let onCancel: () -> Void
 
-    init(invoice: Invoice, onSave: @escaping (Invoice) -> Void, onCancel: @escaping () -> Void) {
+    init(store: ReceiptStore, invoice: Invoice, onSave: @escaping (Invoice) -> Void, onCancel: @escaping () -> Void) {
+        self.store = store
         self.invoice = invoice
         self.onSave = onSave
         self.onCancel = onCancel
@@ -22,6 +26,8 @@ struct ReceiptEditorView: View {
         _totalText = State(initialValue: invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? "")
         _currency = State(initialValue: invoice.currency ?? Invoice.defaultCurrency)
         _category = State(initialValue: invoice.category ?? "Miscellaneous")
+        _cardLast4 = State(initialValue: invoice.cardLast4 ?? "")
+        _cardBank = State(initialValue: invoice.cardBank ?? "")
         _rawText = State(initialValue: invoice.rawText)
     }
 
@@ -104,6 +110,11 @@ struct ReceiptEditorView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.systemBackground).opacity(0.94))
             .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            HStack(spacing: 12) {
+                menuPicker(title: "Card last 4", selection: $cardLast4, options: store.availableCardLast4Options, icon: "creditcard")
+                menuPicker(title: "Card bank", selection: $cardBank, options: store.availableCardBankOptions, icon: "building.columns")
+            }
         }
         .padding()
         .background(.regularMaterial)
@@ -132,6 +143,8 @@ struct ReceiptEditorView: View {
             updated.date = date
             updated.currency = currency.trimmingCharacters(in: .whitespacesAndNewlines)
             updated.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
+            updated.cardLast4 = PaymentMappingService.normalizedLast4(from: cardLast4)
+            updated.cardBank = cardBank.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             updated.rawText = rawText
             updated.total = Decimal(string: totalText.replacingOccurrences(of: ",", with: "")) ?? updated.total
             onSave(updated)
@@ -152,6 +165,26 @@ struct ReceiptEditorView: View {
             Image(systemName: icon)
                 .foregroundStyle(.blue)
             TextField(title, text: text)
+        }
+        .padding(14)
+        .background(Color(.systemBackground).opacity(0.94))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func menuPicker(title: String, selection: Binding<String>, options: [String], icon: String) -> some View {
+        let allOptions = Array(Set(options + (selection.wrappedValue.nilIfEmpty.map { [$0] } ?? []))).sorted()
+
+        return HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(.blue)
+            Picker(title, selection: selection) {
+                Text("Not selected").tag("")
+                ForEach(allOptions, id: \.self) { option in
+                    Text(option).tag(option)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
         .background(Color(.systemBackground).opacity(0.94))

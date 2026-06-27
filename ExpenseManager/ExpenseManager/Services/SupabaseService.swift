@@ -6,8 +6,14 @@ struct ParsedReceipt: Codable {
     var total: Decimal?
     var currency: String?
     var extracted_digits: String?
+    var card_last4: String?
+    var card_bank: String?
     var category: String?
     var line_items: [ParsedLineItem]?
+
+    var cardLast4: String? {
+        PaymentMappingService.normalizedLast4(from: card_last4) ?? PaymentMappingService.normalizedLast4(from: extracted_digits)
+    }
 }
 
 struct ParsedLineItem: Codable {
@@ -41,6 +47,23 @@ actor SupabaseService {
         if let prefer {
             request.setValue(prefer, forHTTPHeaderField: "Prefer")
         }
+    }
+
+    private func jsonString(_ value: String?) -> Any {
+        value.map { $0 as Any } ?? NSNull()
+    }
+
+    private func jsonDecimal(_ value: Decimal?) -> Any {
+        value.map { NSDecimalNumber(decimal: $0) as Any } ?? NSNull()
+    }
+
+    private func jsonLineItems(_ items: [ParsedLineItem]?) -> [[String: Any]] {
+        items?.map { item in
+            [
+                "description": item.description.map { $0 as Any } ?? NSNull(),
+                "amount": item.amount.map { NSDecimalNumber(decimal: $0) as Any } ?? NSNull()
+            ]
+        } ?? []
     }
 
     // Upload bytes to Supabase Storage (bucket: receipt-documents)
@@ -112,7 +135,7 @@ actor SupabaseService {
         return rows.compactMap { Invoice(from: $0) }
     }
 
-    func updateReceipt(id: UUID, merchant: String?, date: Date?, total: Decimal?, currency: String?, category: String?) async throws {
+    func updateReceipt(id: UUID, merchant: String?, date: Date?, total: Decimal?, currency: String?, category: String?, cardLast4: String?, cardBank: String?) async throws {
         guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/receipts"), resolvingAgainstBaseURL: false) else {
             throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL for receipt update"])
         }
@@ -125,12 +148,15 @@ actor SupabaseService {
         req.httpMethod = "PATCH"
         applySupabaseHeaders(to: &req, contentType: "application/json", prefer: "return=minimal")
 
-        var body: [String: Any] = [:]
-        body["merchant"] = merchant as Any
-        body["date"] = date.map { ISO8601DateFormatter().string(from: $0) }
-        body["total"] = total.map { NSDecimalNumber(decimal: $0) }
-        body["currency"] = currency as Any
-        body["category"] = category as Any
+        let body: [String: Any] = [
+            "merchant": jsonString(merchant),
+            "date": date.map { ISO8601DateFormatter().string(from: $0) as Any } ?? NSNull(),
+            "total": jsonDecimal(total),
+            "currency": jsonString(currency),
+            "category": jsonString(category),
+            "card_last4": jsonString(PaymentMappingService.normalizedLast4(from: cardLast4)),
+            "card_bank": jsonString(cardBank)
+        ]
 
         req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
         let (_, response) = try await URLSession.shared.data(for: req)
@@ -165,18 +191,23 @@ actor SupabaseService {
         req.httpMethod = "POST"
         applySupabaseHeaders(to: &req, contentType: "application/json", prefer: "return=representation")
 
+        let cardLast4 = parsed.cardLast4
         let body: [String: Any] = [
-            "merchant": parsed.merchant as Any,
-            "date": parsed.date as Any,
-            "total": parsed.total.map { NSDecimalNumber(decimal: $0) } as Any,
-            "currency": parsed.currency as Any,
-            "category": parsed.category as Any,
-            "file_url": fileUrl as Any,
+            "merchant": jsonString(parsed.merchant),
+            "date": jsonString(parsed.date),
+            "total": jsonDecimal(parsed.total),
+            "currency": jsonString(parsed.currency),
+            "category": jsonString(parsed.category),
+            "card_last4": jsonString(cardLast4),
+            "card_bank": jsonString(parsed.card_bank),
+            "file_url": jsonString(fileUrl),
             "raw_ocr_json": [
                 "raw_text": rawText ?? "",
                 "extracted_digits": parsed.extracted_digits ?? "",
+                "card_last4": cardLast4 ?? "",
+                "card_bank": parsed.card_bank ?? "",
                 "category": parsed.category ?? "",
-                "line_items": parsed.line_items ?? []
+                "line_items": jsonLineItems(parsed.line_items)
             ] as Any
         ]
 

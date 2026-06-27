@@ -9,6 +9,7 @@ struct SpendingReportView: View {
                 header
                 summaryCard
                 trendChart
+                cardSpendByBank
                 recentReceipts
                 insightsCard
             }
@@ -126,6 +127,65 @@ struct SpendingReportView: View {
         return CGFloat(truncating: (amount / maxValue) as NSDecimalNumber) * availableHeight
     }
 
+    private var cardSpendByBank: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Card Spend by Bank")
+                        .font(.headline)
+                    Text("Track how much you spend on each mapped credit card.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Image(systemName: "creditcard.fill")
+                    .font(.title3)
+                    .foregroundColor(.orange)
+                    .padding(10)
+                    .background(Color.orange.opacity(0.15))
+                    .clipShape(Circle())
+            }
+
+            if store.cardSpendSummaries.isEmpty {
+                Text("No card information found yet. Add cards to the lookup table and scan receipts that show card last digits.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemBackground).opacity(0.95))
+                    .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            } else {
+                ForEach(store.cardSpendSummaries) { summary in
+                    HStack(spacing: 12) {
+                        Image(systemName: "building.columns.fill")
+                            .foregroundColor(.orange)
+                            .frame(width: 38, height: 38)
+                            .background(Color.orange.opacity(0.14))
+                            .clipShape(Circle())
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(summary.displayName)
+                                .font(.subheadline.weight(.semibold))
+                            Text("\(summary.receiptCount) receipt\(summary.receiptCount == 1 ? "" : "s")")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Text(summary.amount.formatted(.currency(code: Invoice.defaultCurrency)))
+                            .font(.subheadline.bold())
+                    }
+                    .padding()
+                    .background(Color(.systemBackground).opacity(0.95))
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: Color.black.opacity(0.03), radius: 8, x: 0, y: 6)
+                }
+            }
+        }
+        .padding()
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 10)
+    }
+
     private var recentReceipts: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Latest Receipts")
@@ -156,6 +216,11 @@ struct SpendingReportView: View {
                         Label(invoice.category ?? "Miscellaneous", systemImage: "tag.fill")
                             .font(.caption2.weight(.bold))
                             .foregroundColor(.purple)
+                        if let cardLabel = cardLabel(for: invoice) {
+                            Label(cardLabel, systemImage: "creditcard.fill")
+                                .font(.caption2.weight(.bold))
+                                .foregroundColor(.orange)
+                        }
                     }
                     Spacer()
                     Text(invoice.total.map { $0.formatted(.currency(code: invoice.currency ?? Invoice.defaultCurrency)) } ?? "—")
@@ -171,6 +236,11 @@ struct SpendingReportView: View {
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .shadow(color: Color.black.opacity(0.06), radius: 14, x: 0, y: 10)
+    }
+
+    private func cardLabel(for invoice: Invoice) -> String? {
+        guard let last4 = invoice.cardLast4?.nilIfEmpty else { return nil }
+        return "\(invoice.cardBank?.nilIfEmpty ?? "Unknown Bank") •••• \(last4)"
     }
 
     private var insightsCard: some View {

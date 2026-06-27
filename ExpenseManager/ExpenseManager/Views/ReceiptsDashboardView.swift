@@ -356,6 +356,15 @@ private struct ReceiptRow: View {
                         .background(Color.purple.opacity(0.12))
                         .foregroundStyle(.purple)
                         .clipShape(Capsule())
+                    if let cardLabel {
+                        Label(cardLabel, systemImage: "creditcard.fill")
+                            .font(.caption.weight(.bold))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(Color.orange.opacity(0.12))
+                            .foregroundStyle(.orange)
+                            .clipShape(Capsule())
+                    }
                 }
                 Spacer()
                 Text(invoice.total.map { $0.formatted(.currency(code: invoice.currency ?? Invoice.defaultCurrency)) } ?? "—")
@@ -389,5 +398,10 @@ private struct ReceiptRow: View {
 
     private var initial: String {
         String((invoice.merchant ?? "Receipt").prefix(1)).uppercased()
+    }
+
+    private var cardLabel: String? {
+        guard let last4 = invoice.cardLast4?.nilIfEmpty else { return nil }
+        return "\(invoice.cardBank?.nilIfEmpty ?? "Unknown Bank") •••• \(last4)"
     }
 }

@@ -22,7 +22,7 @@ struct MainTabView: View {
             .tag(AppTab.receipts)
 
             NavigationStack {
-                SpendingReportView(store: store)
+                ReportDashboardView(store: store)
             }
             .tabItem {
                 Label("Report", systemImage: "chart.line.uptrend.xyaxis")
@@ -54,14 +54,14 @@ struct MainTabView: View {
             Task { await store.importPhotoItem(store.selectedPhoto) }
         }
         .sheet(item: $store.editingInvoice) { invoice in
-            ReceiptEditorView(invoice: invoice, onSave: { invoice in
+            ReceiptEditorView(store: store, invoice: invoice, onSave: { invoice in
                 Task { await store.updateInvoice(invoice) }
             }, onCancel: {
                 store.editingInvoice = nil
             })
         }
         .sheet(item: $store.pendingReceipt) { _ in
-            PendingReceiptReviewView(pending: $store.pendingReceipt, onConfirm: { invoice in
+            PendingReceiptReviewView(store: store, pending: $store.pendingReceipt, onConfirm: { invoice in
                 await store.confirmPendingReceipt(invoice)
             }, onDiscard: {
                 store.discardPendingReceipt()

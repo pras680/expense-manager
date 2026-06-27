@@ -16,8 +16,10 @@ class ReceiptStore: ObservableObject {
     @Published var editingInvoice: Invoice? = nil
     @Published var searchText = ""
     @Published var selectedFilter: ReceiptFilter = .all
+    @Published var paymentMethods: [PaymentMethod] = []
 
     let supabaseService: SupabaseService
+    private let paymentMappingService: PaymentMappingService
     private let ocr = OCRService()
     private let calendar = Calendar.current
     private var pendingReceiptQueue: [PendingReceipt] = []
@@ -26,6 +28,29 @@ class ReceiptStore: ObservableObject {
         let id: UUID
         var invoice: Invoice
         var imageData: Data?
+    }
+
+    struct CardSpendSummary: Identifiable {
+        let id: String
+        let bank: String
+        let last4: String?
+        let amount: Decimal
+        let receiptCount: Int
+
+        var displayName: String {
+            if let last4 {
+                return "\(bank) •••• \(last4)"
+            }
+            return bank
+        }
+    }
+
+    struct SpendSummary: Identifiable {
+        let id: String
+        let title: String
+        let subtitle: String
+        let amount: Decimal
+        let receiptCount: Int
     }
 
     enum ReceiptFilter: String, CaseIterable, Identifiable {
@@ -38,6 +63,10 @@ class ReceiptStore: ObservableObject {
 
     init(supabaseService: SupabaseService) {
         self.supabaseService = supabaseService
+        self.paymentMappingService = PaymentMappingService(
+            supabaseUrl: supabaseService.supabaseUrl.absoluteString,
+            supabaseAnonKey: supabaseService.supabaseAnonKey
+        )
     }
 
     var filteredInvoices: [Invoice] {
@@ -78,6 +107,103 @@ class ReceiptStore: ObservableObject {
         invoices.sorted(by: { ($0.date ?? Date.distantPast) > ($1.date ?? Date.distantPast) }).prefix(4).map { $0 }
     }
 
+    var availableCardLast4Options: [String] {
+        Array(Set((paymentMethods.map(\.lastDigits) + invoices.compactMap { $0.cardLast4?.nilIfEmpty })))
+            .sorted()
+    }
+
+    var availableCardBankOptions: [String] {
+        Array(Set((paymentMethods.map(\.bankName) + invoices.compactMap { $0.cardBank?.nilIfEmpty })))
+            .sorted()
+    }
+
+    var categorySpendSummaries: [SpendSummary] {
+        groupedSpend { invoice in
+            let category = invoice.category?.nilIfEmpty ?? "Miscellaneous"
+            return (id: category, title: category, subtitle: "Expense category")
+        }
+    }
+
+    var monthlySpendSummaries: [SpendSummary] {
+        let monthFormatter = DateFormatter()
+        monthFormatter.dateFormat = "yyyy-MM"
+        let titleFormatter = DateFormatter()
+        titleFormatter.dateFormat = "MMM yyyy"
+
+        return groupedSpend { invoice in
+            guard let date = invoice.date else {
+                return (id: "unknown", title: "No Date", subtitle: "Receipts without a date")
+            }
+            return (id: monthFormatter.string(from: date), title: titleFormatter.string(from: date), subtitle: "Monthly spend")
+        }
+    }
+
+    var cardSpendSummaries: [CardSpendSummary] {
+        var grouped: [String: (bank: String, last4: String?, amount: Decimal, receiptCount: Int)] = [:]
+
+        for invoice in invoices {
+            let bank = invoice.cardBank?.nilIfEmpty ?? "Unknown Bank"
+            let last4 = invoice.cardLast4?.nilIfEmpty
+            let key = "\(bank)|\(last4 ?? "unknown")"
+            let existing = grouped[key] ?? (bank: bank, last4: last4, amount: 0, receiptCount: 0)
+            grouped[key] = (
+                bank: bank,
+                last4: last4,
+                amount: existing.amount + (invoice.total ?? 0),
+                receiptCount: existing.receiptCount + 1
+            )
+        }
+
+        return grouped.map { key, value in
+            CardSpendSummary(
+                id: key,
+                bank: value.bank,
+                last4: value.last4,
+                amount: value.amount,
+                receiptCount: value.receiptCount
+            )
+        }
+        .sorted { $0.amount > $1.amount }
+    }
+
+    var cardSpendReportSummaries: [SpendSummary] {
+        cardSpendSummaries.map { summary in
+            SpendSummary(
+                id: summary.id,
+                title: summary.displayName,
+                subtitle: "\(summary.receiptCount) receipt\(summary.receiptCount == 1 ? "" : "s")",
+                amount: summary.amount,
+                receiptCount: summary.receiptCount
+            )
+        }
+    }
+
+    private func groupedSpend(keyProvider: (Invoice) -> (id: String, title: String, subtitle: String)) -> [SpendSummary] {
+        var grouped: [String: (title: String, subtitle: String, amount: Decimal, receiptCount: Int)] = [:]
+
+        for invoice in invoices {
+            let key = keyProvider(invoice)
+            let existing = grouped[key.id] ?? (title: key.title, subtitle: key.subtitle, amount: 0, receiptCount: 0)
+            grouped[key.id] = (
+                title: key.title,
+                subtitle: key.subtitle,
+                amount: existing.amount + (invoice.total ?? 0),
+                receiptCount: existing.receiptCount + 1
+            )
+        }
+
+        return grouped.map { id, value in
+            SpendSummary(
+                id: id,
+                title: value.title,
+                subtitle: value.subtitle,
+                amount: value.amount,
+                receiptCount: value.receiptCount
+            )
+        }
+        .sorted { $0.amount > $1.amount }
+    }
+
     var weeklySpendByDay: [(label: String, amount: Decimal)] {
         let today = calendar.startOfDay(for: Date())
         let labels = (0..<7).reversed().compactMap { offset -> Date? in
@@ -108,14 +234,25 @@ class ReceiptStore: ObservableObject {
 
         do {
             invoices = try await supabaseService.fetchReceipts()
+            await loadPaymentMethods()
             statusMessage = "Loaded \(invoices.count) receipts"
         } catch {
             invoices = []
+            await loadPaymentMethods()
             statusMessage = "Receipts will save after backend access is configured."
             print("DEBUG: fetch receipts failed: \(error.localizedDescription)")
         }
 
         isProcessing = false
+    }
+
+    func loadPaymentMethods() async {
+        do {
+            paymentMethods = try await paymentMappingService.fetchPaymentMethods()
+        } catch {
+            paymentMethods = []
+            print("DEBUG: payment methods fetch failed: \(error.localizedDescription)")
+        }
     }
 
     func processScannerResult(_ result: Result<[ScannerImage], Error>) async {
@@ -214,7 +351,9 @@ class ReceiptStore: ObservableObject {
                 date: fallbackInvoice.date.map { ISO8601DateFormatter().string(from: $0) },
                 total: fallbackInvoice.total,
                 currency: fallbackInvoice.currency ?? Invoice.defaultCurrency,
-                extracted_digits: nil,
+                extracted_digits: fallbackInvoice.cardLast4,
+                card_last4: fallbackInvoice.cardLast4,
+                card_bank: nil,
                 category: fallbackInvoice.category,
                 line_items: nil
             )
@@ -224,9 +363,29 @@ class ReceiptStore: ObservableObject {
 
         var invoice = Invoice(from: parsed, rawText: rawText)
         invoice.currency = parsed.currency ?? Invoice.defaultCurrency
+        invoice.cardLast4 = invoice.cardLast4 ?? PaymentMappingService.extractCardLast4(from: rawText)
+        await applyPaymentLookup(to: &invoice)
 
         enqueuePendingReceipt(invoice: invoice, imageData: imageData)
         statusMessage = "Receipt extracted — review and approve before saving."
+    }
+
+    private func applyPaymentLookup(to invoice: inout Invoice) async {
+        invoice.cardLast4 = PaymentMappingService.normalizedLast4(from: invoice.cardLast4)
+        guard let last4 = invoice.cardLast4 else { return }
+
+        do {
+            if let paymentMethod = try await paymentMappingService.findPaymentMethod(lastDigits: last4) {
+                invoice.cardBank = paymentMethod.bankName
+            } else if invoice.cardBank == nil {
+                invoice.cardBank = "Unknown Bank"
+            }
+        } catch {
+            if invoice.cardBank == nil {
+                invoice.cardBank = "Unknown Bank"
+            }
+            print("DEBUG: payment lookup failed for card ending \(last4): \(error.localizedDescription)")
+        }
     }
 
     func runSampleReceiptTrial() async {
@@ -288,7 +447,9 @@ class ReceiptStore: ObservableObject {
                 date: invoice.date.map { ISO8601DateFormatter().string(from: $0) },
                 total: invoice.total,
                 currency: invoice.currency,
-                extracted_digits: nil,
+                extracted_digits: invoice.cardLast4,
+                card_last4: invoice.cardLast4,
+                card_bank: invoice.cardBank,
                 category: invoice.category,
                 line_items: nil
             ), rawText: invoice.rawText, fileUrl: fileUrl)
@@ -315,18 +476,22 @@ class ReceiptStore: ObservableObject {
     func updateInvoice(_ invoice: Invoice) async {
         isProcessing = true
         statusMessage = "Saving changes..."
+        var updatedInvoice = invoice
+        await applyPaymentLookup(to: &updatedInvoice)
 
         do {
             try await supabaseService.updateReceipt(
-                id: invoice.id,
-                merchant: invoice.merchant,
-                date: invoice.date,
-                total: invoice.total,
-                currency: invoice.currency,
-                category: invoice.category
+                id: updatedInvoice.id,
+                merchant: updatedInvoice.merchant,
+                date: updatedInvoice.date,
+                total: updatedInvoice.total,
+                currency: updatedInvoice.currency,
+                category: updatedInvoice.category,
+                cardLast4: updatedInvoice.cardLast4,
+                cardBank: updatedInvoice.cardBank
             )
-            if let index = invoices.firstIndex(where: { $0.id == invoice.id }) {
-                invoices[index] = invoice
+            if let index = invoices.firstIndex(where: { $0.id == updatedInvoice.id }) {
+                invoices[index] = updatedInvoice
             }
             statusMessage = "Receipt updated"
         } catch {

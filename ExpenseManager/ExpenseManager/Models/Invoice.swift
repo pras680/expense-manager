@@ -7,6 +7,8 @@ struct Invoice: Identifiable, Codable {
     var total: Decimal? = nil
     var currency: String? = nil
     var category: String? = nil
+    var cardLast4: String? = nil
+    var cardBank: String? = nil
     var rawText: String = ""
     var fileUrl: String? = nil
 }
@@ -52,6 +54,7 @@ extension Invoice {
     ]
 
     init(from parsed: ParsedReceipt, rawText: String, fileUrl: String? = nil) {
+        let last4 = parsed.cardLast4 ?? PaymentMappingService.normalizedLast4(from: parsed.extracted_digits)
         self.init(
             id: UUID(),
             merchant: parsed.merchant,
@@ -59,6 +62,8 @@ extension Invoice {
             total: parsed.total,
             currency: parsed.currency,
             category: parsed.category,
+            cardLast4: last4,
+            cardBank: parsed.card_bank,
             rawText: rawText,
             fileUrl: fileUrl
         )
@@ -75,6 +80,8 @@ extension Invoice {
         let fileUrl = dictionary["file_url"] as? String
         let currency = dictionary["currency"] as? String
         let category = dictionary["category"] as? String
+        let cardLast4 = dictionary["card_last4"] as? String
+        let cardBank = dictionary["card_bank"] as? String
 
         let total: Decimal?
         if let number = dictionary["total"] as? NSNumber {
@@ -92,6 +99,8 @@ extension Invoice {
             total: total,
             currency: currency,
             category: category,
+            cardLast4: cardLast4,
+            cardBank: cardBank,
             rawText: "",
             fileUrl: fileUrl
         )
@@ -121,6 +130,8 @@ extension Invoice {
         if merchant?.lowercased().contains(lowercased) == true { return true }
         if currency?.lowercased().contains(lowercased) == true { return true }
         if category?.lowercased().contains(lowercased) == true { return true }
+        if cardLast4?.lowercased().contains(lowercased) == true { return true }
+        if cardBank?.lowercased().contains(lowercased) == true { return true }
         if rawText.lowercased().contains(lowercased) { return true }
         if let date = date,
            DateFormatter.localizedString(from: date, dateStyle: .medium, timeStyle: .none)
@@ -159,6 +170,7 @@ struct InvoiceParser {
             invoice.total = total
         }
 
+        invoice.cardLast4 = PaymentMappingService.extractCardLast4(from: text)
         invoice.category = inferCategory(from: text, merchant: invoice.merchant)
 
         return invoice
