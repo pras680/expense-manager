@@ -41,7 +41,10 @@ struct MainTabView: View {
         }
         .tint(Color(red: 0.16, green: 0.36, blue: 0.92))
         .task {
+            await store.refreshSupabaseSession()
             await store.loadReceipts()
+            store.configureGmailBackgroundSchedule()
+            store.runGmailScanOnAppLoad()
         }
         .fullScreenCover(isPresented: $store.showScanner) {
             DocumentScanner { result in
@@ -66,6 +69,9 @@ struct MainTabView: View {
             }, onDiscard: {
                 store.discardPendingReceipt()
             })
+        }
+        .sheet(isPresented: $store.showSupabaseSignIn) {
+            SupabaseSignInView(store: store)
         }
     }
 }
@@ -106,6 +112,8 @@ private struct ToolsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
 
+                currencySettingsCard
+
                 VStack(spacing: 14) {
                     toolButton(title: "Scan with Camera", subtitle: "Capture a real receipt", icon: "camera.viewfinder", tint: .green) {
                         store.showScanner = true
@@ -115,6 +123,29 @@ private struct ToolsView: View {
                     }
                     toolButton(title: "Run Sample OCR Trial", subtitle: "Generate a sample receipt image and extract text", icon: "doc.text.viewfinder", tint: .purple) {
                         Task { await store.runSampleReceiptTrial() }
+                    }
+                    toolButton(title: store.gmailAgentTitle, subtitle: store.gmailAgentSubtitle, icon: "envelope.badge.shield.half.filled", tint: store.gmailAgentIsRunning ? .red : .blue) {
+                        store.toggleGmailAgent()
+                    }
+                    Toggle(isOn: Binding(
+                        get: { store.gmailDailyAgentEnabled },
+                        set: { store.setGmailDailyAgentEnabled($0) }
+                    )) {
+                        Label("Daily Gmail Agent", systemImage: "calendar.badge.clock")
+                            .font(.headline)
+                        Text(store.gmailScheduleSubtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding()
+                    .background(Color(.systemBackground).opacity(0.92))
+                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    toolButton(title: store.supabaseAuthTitle, subtitle: store.supabaseAuthSubtitle, icon: store.supabaseSession == nil ? "lock.open.display" : "person.crop.circle.badge.checkmark", tint: store.supabaseSession == nil ? .blue : .green) {
+                        if store.supabaseSession == nil {
+                            store.showSupabaseSignIn = true
+                        } else {
+                            Task { await store.signOutFromSupabase() }
+                        }
                     }
                     toolButton(title: "Reload Supabase Receipts", subtitle: "Refresh saved receipt rows", icon: "arrow.clockwise.circle.fill", tint: .orange) {
                         Task { await store.loadReceipts() }
@@ -130,6 +161,7 @@ private struct ToolsView: View {
                     checklistRow("Edge Function deployed", detail: "/functions/v1/parse-receipt")
                     checklistRow("Receipts table policies", detail: "Allow anon insert/select or add app auth")
                     checklistRow("Storage bucket policy", detail: "Allow uploads to receipt-documents")
+                    checklistRow("Google OAuth configured", detail: "iOS client ID + Gmail read-only scope")
                 }
                 .padding()
                 .background(Color(.systemBackground).opacity(0.92))
@@ -140,6 +172,44 @@ private struct ToolsView: View {
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .navigationTitle("Tools")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var currencySettingsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "dollarsign.arrow.circlepath")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(Color.teal.gradient)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Default Currency")
+                        .font(.headline)
+                    Text("Reports use converted \(store.defaultCurrencyCode) amounts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+
+            Picker("Default currency", selection: Binding(
+                get: { store.defaultCurrencyCode },
+                set: { store.setDefaultCurrency($0) }
+            )) {
+                ForEach(Invoice.commonCurrencies, id: \.self) { currency in
+                    Text(currency).tag(currency)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text("Non-default receipt currencies are converted using the receipt date and stored with the exchange rate.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .background(Color(.systemBackground).opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private func toolButton(title: String, subtitle: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {

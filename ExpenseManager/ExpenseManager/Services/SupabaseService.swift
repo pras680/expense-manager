@@ -1,10 +1,81 @@
 import Foundation
+import Security
+
+/// Centralized privacy/security helpers for client-side sanitization.
+/// The Supabase publishable key in the app is not a secret; backend security must be enforced by RLS/Auth.
+enum AppSecurity {
+    static let maxExtractedTextCharacters = 18_000
+    static let maxSharedTextCharacters = 8_000
+    static let maxReceiptUploadBytes = 8 * 1024 * 1024
+
+    static func clippedSensitiveText(_ text: String, limit: Int = maxExtractedTextCharacters) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > limit else { return trimmed }
+        return String(trimmed.prefix(limit))
+    }
+
+    static func sanitizedStorageFilename(_ filename: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        let sanitizedScalars = filename.unicodeScalars.map { scalar in
+            allowed.contains(scalar) ? String(scalar) : "-"
+        }.joined()
+        let sanitized = sanitizedScalars
+            .replacingOccurrences(of: #"-+"#, with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        let base = sanitized.isEmpty ? UUID().uuidString : sanitized
+        return String(base.prefix(120))
+    }
+
+    static func backendError(prefix: String, statusCode: Int?, data: Data) -> NSError {
+        let statusText = statusCode.map { "HTTP \($0)" } ?? "No HTTP status"
+        let userMessage = "\(prefix) (\(statusText)). Check backend access, RLS, or network configuration."
+        var userInfo: [String: Any] = [NSLocalizedDescriptionKey: userMessage]
+        if let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty {
+            userInfo[NSDebugDescriptionErrorKey] = redactedDiagnostic(raw)
+        }
+        return NSError(domain: "Backend", code: statusCode ?? -1, userInfo: userInfo)
+    }
+
+    static func safeUserMessage(for error: Error, fallback: String) -> String {
+        let nsError = error as NSError
+        if ["Backend", "PostgREST", "SupabaseStorage", "EdgeFunction"].contains(nsError.domain) {
+            return fallback
+        }
+        return error.localizedDescription
+    }
+
+    static func redactedDiagnostic(_ text: String) -> String {
+        var redacted = text
+        let patterns = [
+            #"Bearer\s+[A-Za-z0-9._\-]+"#,
+            #"sb_publishable_[A-Za-z0-9_\-]+"#,
+            #"eyJ[A-Za-z0-9._\-]+"#,
+            #"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization)\"?\s*[:=]\s*\"?[^\"\s,}]+"#
+        ]
+        for pattern in patterns {
+            redacted = redacted.replacingOccurrences(of: pattern, with: "[REDACTED]", options: .regularExpression)
+        }
+        return String(redacted.prefix(1_000))
+    }
+
+    static func debugLog(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("DEBUG: \(message())")
+        #endif
+    }
+
+}
 
 struct ParsedReceipt: Codable {
     var merchant: String?
     var date: String?
     var total: Decimal?
+    var receipt_amount: Decimal?
     var currency: String?
+    var default_currency: String?
+    var receipt_currency: String?
+    var conversion_rate: Decimal?
+    var converted_total: Decimal?
     var extracted_digits: String?
     var card_last4: String?
     var card_bank: String?
@@ -21,24 +92,150 @@ struct ParsedLineItem: Codable {
     var amount: Decimal?
 }
 
+struct ReceiptLearningHint: Codable, Hashable {
+    let merchantKeyword: String
+    let correctedMerchant: String?
+    let correctedCategory: String?
+    let correctedCurrency: String?
+    let correctedCardLast4: String?
+    let correctedCardBank: String?
+}
+
+struct SupabaseAuthSession: Codable, Equatable {
+    let accessToken: String
+    let refreshToken: String
+    let expiresAt: Date
+    let userID: String
+    let email: String?
+
+    var isExpiredOrNearExpiry: Bool {
+        Date().addingTimeInterval(90) >= expiresAt
+    }
+}
+
+private struct SupabaseTokenResponse: Decodable {
+    let accessToken: String
+    let refreshToken: String?
+    let expiresIn: Int?
+    let user: SupabaseAuthUser
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case expiresIn = "expires_in"
+        case user
+    }
+}
+
+private struct SupabaseAuthUser: Decodable {
+    let id: String
+    let email: String?
+}
+
 actor SupabaseService {
     let supabaseUrl: URL
     let supabaseAnonKey: String
     let edgeFunctionBaseUrl: URL
+    private var shouldUseLegacyReceiptInsert = false
+    private let authCredentialStore: SupabaseCredentialStore
+    private var authSession: SupabaseAuthSession?
+    private var useAnonymousAccess = true
 
     init(supabaseUrl: String, supabaseAnonKey: String, edgeFunctionBaseUrl: String) {
         self.supabaseUrl = URL(string: supabaseUrl)!
         self.supabaseAnonKey = supabaseAnonKey
         self.edgeFunctionBaseUrl = URL(string: edgeFunctionBaseUrl)!
+        self.authCredentialStore = SupabaseCredentialStore(
+            service: "BillSkillsSupabaseAuth",
+            account: URL(string: supabaseUrl)?.host ?? supabaseUrl
+        )
+        self.authSession = authCredentialStore.loadSession()
     }
 
-    private var canUseBearerAuthorization: Bool {
-        supabaseAnonKey.split(separator: ".").count == 3
+    func currentSession() -> SupabaseAuthSession? {
+        useAnonymousAccess ? nil : authSession
     }
 
-    private func applySupabaseHeaders(to request: inout URLRequest, contentType: String? = nil, prefer: String? = nil) {
+    func currentAccessToken() async -> String? {
+        guard !useAnonymousAccess else { return nil }
+        try? await refreshAuthSessionIfNeeded()
+        return authSession?.accessToken
+    }
+
+    func signIn(email: String, password: String) async throws -> SupabaseAuthSession {
+        guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/auth/v1/token"), resolvingAgainstBaseURL: false) else {
+            throw NSError(domain: "SupabaseAuth", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid Supabase Auth URL"])
+        }
+        components.queryItems = [URLQueryItem(name: "grant_type", value: "password")]
+        guard let url = components.url else {
+            throw NSError(domain: "SupabaseAuth", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid Supabase Auth URL components"])
+        }
+
+        let response = try await requestToken(url: url, body: [
+            "email": email.trimmingCharacters(in: .whitespacesAndNewlines),
+            "password": password
+        ])
+        let session = makeAuthSession(from: response, fallbackRefreshToken: response.refreshToken)
+        authSession = session
+        useAnonymousAccess = false
+        authCredentialStore.saveSession(session)
+        return session
+    }
+
+    func signOut() {
+        useAnonymousAccess = true
+        authSession = nil
+        authCredentialStore.deleteSession()
+    }
+
+    private func refreshAuthSessionIfNeeded() async throws {
+        guard let session = authSession, session.isExpiredOrNearExpiry else { return }
+        guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/auth/v1/token"), resolvingAgainstBaseURL: false) else {
+            throw NSError(domain: "SupabaseAuth", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid Supabase Auth URL"])
+        }
+        components.queryItems = [URLQueryItem(name: "grant_type", value: "refresh_token")]
+        guard let url = components.url else {
+            throw NSError(domain: "SupabaseAuth", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid Supabase Auth URL components"])
+        }
+
+        let response = try await requestToken(url: url, body: ["refresh_token": session.refreshToken])
+        let refreshedSession = makeAuthSession(from: response, fallbackRefreshToken: session.refreshToken)
+        authSession = refreshedSession
+        authCredentialStore.saveSession(refreshedSession)
+    }
+
+    private func requestToken(url: URL, body: [String: String]) async throws -> SupabaseTokenResponse {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
         request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        if canUseBearerAuthorization {
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw AppSecurity.backendError(prefix: "Sign in failed", statusCode: (response as? HTTPURLResponse)?.statusCode, data: data)
+        }
+        return try JSONDecoder().decode(SupabaseTokenResponse.self, from: data)
+    }
+
+    private func makeAuthSession(from response: SupabaseTokenResponse, fallbackRefreshToken: String?) -> SupabaseAuthSession {
+        SupabaseAuthSession(
+            accessToken: response.accessToken,
+            refreshToken: response.refreshToken ?? fallbackRefreshToken ?? "",
+            expiresAt: Date().addingTimeInterval(TimeInterval(response.expiresIn ?? 3600)),
+            userID: response.user.id,
+            email: response.user.email
+        )
+    }
+
+    private func applySupabaseHeaders(to request: inout URLRequest, contentType: String? = nil, prefer: String? = nil) async throws {
+        if !useAnonymousAccess {
+            try await refreshAuthSessionIfNeeded()
+        }
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        if !useAnonymousAccess, let accessToken = authSession?.accessToken {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        } else {
             request.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
         }
         if let contentType {
@@ -66,66 +263,120 @@ actor SupabaseService {
         } ?? []
     }
 
+    private func postgrestError(prefix: String, statusCode: Int?, data: Data) -> NSError {
+        AppSecurity.backendError(prefix: prefix, statusCode: statusCode, data: data)
+    }
+
+    private func isMissingColumnError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        let message = "\(error.localizedDescription) \(nsError.userInfo[NSDebugDescriptionErrorKey] as? String ?? "")".lowercased()
+        return message.contains("pgrst204")
+            || message.contains("42703")
+            || message.contains("schema cache")
+            || message.contains("column") && message.contains("could not find")
+            || message.contains("column") && message.contains("does not exist")
+    }
+
     // Upload bytes to Supabase Storage (bucket: receipt-documents)
     func uploadReceiptImage(data: Data, filename: String) async throws -> String {
+        guard data.count <= AppSecurity.maxReceiptUploadBytes else {
+            throw NSError(domain: "SupabaseStorage", code: 413, userInfo: [NSLocalizedDescriptionKey: "Upload failed: image is too large."])
+        }
+
         let bucket = "receipt-documents"
-        let url = supabaseUrl.appendingPathComponent("storage/v1/object/")
-            .appendingPathComponent(bucket)
-            .appendingPathComponent(filename)
+        let safeFilename = AppSecurity.sanitizedStorageFilename(filename)
+        let objectPath: String
+        let url: URL
+        if let userID = authSession?.userID {
+            objectPath = "\(userID)/\(safeFilename)"
+            url = supabaseUrl.appendingPathComponent("storage/v1/object/")
+                .appendingPathComponent(bucket)
+                .appendingPathComponent(userID)
+                .appendingPathComponent(safeFilename)
+        } else {
+            objectPath = safeFilename
+            url = supabaseUrl.appendingPathComponent("storage/v1/object/")
+                .appendingPathComponent(bucket)
+                .appendingPathComponent(safeFilename)
+        }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        applySupabaseHeaders(to: &req, contentType: "image/jpeg")
+        try await applySupabaseHeaders(to: &req, contentType: "image/jpeg")
         req.httpBody = data
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let text = String(data: data, encoding: .utf8) ?? ""
-            throw NSError(domain: "SupabaseStorage", code: 1, userInfo: [NSLocalizedDescriptionKey: "Upload failed: \(text)"])
+            throw AppSecurity.backendError(prefix: "Upload failed", statusCode: (response as? HTTPURLResponse)?.statusCode, data: data)
         }
 
-        return "\(supabaseUrl.absoluteString)/storage/v1/object/public/\(bucket)/\(filename)"
+        return "\(supabaseUrl.absoluteString)/storage/v1/object/public/\(bucket)/\(objectPath)"
     }
 
     // Call Edge Function to parse raw_text using Anthropic (Edge Function hosted on Supabase)
-    func parseReceiptWithEdge(rawText: String) async throws -> ParsedReceipt {
+    func parseReceiptWithEdge(rawText: String, learningHints: [ReceiptLearningHint] = []) async throws -> ParsedReceipt {
         let url = edgeFunctionBaseUrl
             .appendingPathComponent("functions")
             .appendingPathComponent("v1")
             .appendingPathComponent("parse-receipt")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        applySupabaseHeaders(to: &req, contentType: "application/json")
-        let payload = ["raw_text": rawText]
+        try await applySupabaseHeaders(to: &req, contentType: "application/json")
+        let payload = ReceiptParseRequest(
+            rawText: AppSecurity.clippedSensitiveText(rawText),
+            learningHints: Array(learningHints.prefix(12))
+        )
         req.httpBody = try JSONEncoder().encode(payload)
 
         let (d, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let txt = String(data: d, encoding: .utf8) ?? ""
-            throw NSError(domain: "EdgeFunction", code: 1, userInfo: [NSLocalizedDescriptionKey: "Edge parse failed: \(txt)"])
+            throw AppSecurity.backendError(prefix: "Edge parse failed", statusCode: (resp as? HTTPURLResponse)?.statusCode, data: d)
         }
 
         return try JSONDecoder().decode(ParsedReceipt.self, from: d)
     }
 
+    private struct ReceiptParseRequest: Encodable {
+        let rawText: String
+        let learningHints: [ReceiptLearningHint]
+
+        enum CodingKeys: String, CodingKey {
+            case rawText = "raw_text"
+            case learningHints = "learning_hints"
+        }
+    }
+
     // Fetch receipts from Supabase PostgREST
     func fetchReceipts() async throws -> [Invoice] {
+        do {
+            return try await fetchReceipts(
+                selectColumns: "id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,default_currency,receipt_amount,receipt_currency,conversion_rate,converted_total,category"
+            )
+        } catch {
+            guard isMissingColumnError(error) else { throw error }
+            AppSecurity.debugLog("Optional receipt columns are missing in Supabase. Retrying fetch with legacy-compatible columns.")
+            return try await fetchReceipts(
+                selectColumns: "id,merchant,date,total,currency,file_url,raw_ocr_json"
+            )
+        }
+    }
+
+    private func fetchReceipts(selectColumns: String) async throws -> [Invoice] {
         guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/receipts"), resolvingAgainstBaseURL: false) else {
             throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL for receipts fetch"])
         }
-        components.queryItems = [URLQueryItem(name: "select", value: "*")]
+        components.queryItems = [URLQueryItem(name: "select", value: selectColumns)]
         guard let url = components.url else {
             throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL components for receipts fetch"])
         }
 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
-        applySupabaseHeaders(to: &req)
+        try await applySupabaseHeaders(to: &req)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let text = String(data: data, encoding: .utf8) ?? ""
-            throw NSError(domain: "PostgREST", code: 1, userInfo: [NSLocalizedDescriptionKey: "Fetch failed: \(text)"])
+            throw AppSecurity.backendError(prefix: "Fetch failed", statusCode: (response as? HTTPURLResponse)?.statusCode, data: data)
         }
 
         guard let rows = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] else {
@@ -135,7 +386,80 @@ actor SupabaseService {
         return rows.compactMap { Invoice(from: $0) }
     }
 
-    func updateReceipt(id: UUID, merchant: String?, date: Date?, total: Decimal?, currency: String?, category: String?, cardLast4: String?, cardBank: String?) async throws {
+    func updateReceipt(
+        id: UUID,
+        merchant: String?,
+        date: Date?,
+        total: Decimal?,
+        receiptAmount: Decimal?,
+        currency: String?,
+        defaultCurrency: String?,
+        receiptCurrency: String?,
+        conversionRate: Decimal?,
+        convertedTotal: Decimal?,
+        category: String?,
+        cardLast4: String?,
+        cardBank: String?,
+        rawText: String?
+    ) async throws {
+        do {
+            try await updateReceipt(
+                id: id,
+                merchant: merchant,
+                date: date,
+                total: total,
+                receiptAmount: receiptAmount,
+                currency: currency,
+                defaultCurrency: defaultCurrency,
+                receiptCurrency: receiptCurrency,
+                conversionRate: conversionRate,
+                convertedTotal: convertedTotal,
+                category: category,
+                cardLast4: cardLast4,
+                cardBank: cardBank,
+                rawText: rawText,
+                includeOptionalColumns: true
+            )
+        } catch {
+            guard isMissingColumnError(error) else { throw error }
+            AppSecurity.debugLog("Optional receipt columns are missing or not visible in Supabase schema cache. Retrying update with legacy-compatible raw JSON payload.")
+            try await updateReceipt(
+                id: id,
+                merchant: merchant,
+                date: date,
+                total: total,
+                receiptAmount: receiptAmount,
+                currency: currency,
+                defaultCurrency: defaultCurrency,
+                receiptCurrency: receiptCurrency,
+                conversionRate: conversionRate,
+                convertedTotal: convertedTotal,
+                category: category,
+                cardLast4: cardLast4,
+                cardBank: cardBank,
+                rawText: rawText,
+                includeOptionalColumns: false
+            )
+        }
+    }
+
+    private func updateReceipt(
+        id: UUID,
+        merchant: String?,
+        date: Date?,
+        total: Decimal?,
+        receiptAmount: Decimal?,
+        currency: String?,
+        defaultCurrency: String?,
+        receiptCurrency: String?,
+        conversionRate: Decimal?,
+        convertedTotal: Decimal?,
+        category: String?,
+        cardLast4: String?,
+        cardBank: String?,
+        rawText: String?,
+        includeOptionalColumns: Bool
+    ) async throws {
         guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/receipts"), resolvingAgainstBaseURL: false) else {
             throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL for receipt update"])
         }
@@ -146,23 +470,42 @@ actor SupabaseService {
 
         var req = URLRequest(url: url)
         req.httpMethod = "PATCH"
-        applySupabaseHeaders(to: &req, contentType: "application/json", prefer: "return=minimal")
+        try await applySupabaseHeaders(to: &req, contentType: "application/json", prefer: "return=minimal")
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "merchant": jsonString(merchant),
             "date": date.map { ISO8601DateFormatter().string(from: $0) as Any } ?? NSNull(),
             "total": jsonDecimal(total),
-            "currency": jsonString(currency),
-            "category": jsonString(category),
-            "card_last4": jsonString(PaymentMappingService.normalizedLast4(from: cardLast4)),
-            "card_bank": jsonString(cardBank)
+            "currency": jsonString(receiptCurrency ?? currency),
+            "raw_ocr_json": [
+                "raw_text": rawText.map { AppSecurity.clippedSensitiveText($0) } ?? "",
+                "receipt_amount": receiptAmount?.description ?? "",
+                "receipt_currency": receiptCurrency ?? currency ?? "",
+                "default_currency": defaultCurrency ?? "",
+                "conversion_rate": conversionRate?.description ?? "",
+                "converted_total": convertedTotal?.description ?? "",
+                "category": category ?? "",
+                "card_last4": PaymentMappingService.normalizedLast4(from: cardLast4) ?? "",
+                "card_bank": cardBank ?? ""
+            ] as Any
         ]
 
+        if includeOptionalColumns {
+            body["receipt_amount"] = jsonDecimal(receiptAmount)
+            body["default_currency"] = jsonString(defaultCurrency)
+            body["receipt_currency"] = jsonString(receiptCurrency ?? currency)
+            body["conversion_rate"] = jsonDecimal(conversionRate)
+            body["converted_total"] = jsonDecimal(convertedTotal)
+            body["category"] = jsonString(category)
+            body["card_last4"] = jsonString(PaymentMappingService.normalizedLast4(from: cardLast4))
+            body["card_bank"] = jsonString(cardBank)
+        }
+
         req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
-        let (_, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
 
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw NSError(domain: "PostgREST", code: 3, userInfo: [NSLocalizedDescriptionKey: "Update failed"])
+            throw postgrestError(prefix: "Update failed", statusCode: (response as? HTTPURLResponse)?.statusCode, data: data)
         }
     }
 
@@ -177,45 +520,77 @@ actor SupabaseService {
 
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
-        applySupabaseHeaders(to: &req, prefer: "return=minimal")
+        try await applySupabaseHeaders(to: &req, prefer: "return=minimal")
 
-        let (_, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw NSError(domain: "PostgREST", code: 4, userInfo: [NSLocalizedDescriptionKey: "Delete failed"])
+            throw AppSecurity.backendError(prefix: "Delete failed", statusCode: (response as? HTTPURLResponse)?.statusCode, data: data)
         }
     }
 
     func insertReceiptToDB(parsed: ParsedReceipt, rawText: String? = nil, fileUrl: String?) async throws -> UUID {
+        if shouldUseLegacyReceiptInsert {
+            return try await insertReceiptToDB(parsed: parsed, rawText: rawText, fileUrl: fileUrl, includeOptionalColumns: false)
+        }
+
+        do {
+            return try await insertReceiptToDB(parsed: parsed, rawText: rawText, fileUrl: fileUrl, includeOptionalColumns: true)
+        } catch {
+            guard isMissingColumnError(error) else { throw error }
+            shouldUseLegacyReceiptInsert = true
+            AppSecurity.debugLog("Optional receipt columns are missing or not visible in Supabase schema cache. Retrying with legacy-compatible payload.")
+            return try await insertReceiptToDB(parsed: parsed, rawText: rawText, fileUrl: fileUrl, includeOptionalColumns: false)
+        }
+    }
+
+    private func insertReceiptToDB(parsed: ParsedReceipt, rawText: String?, fileUrl: String?, includeOptionalColumns: Bool) async throws -> UUID {
         let url = supabaseUrl.appendingPathComponent("/rest/v1/receipts")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        applySupabaseHeaders(to: &req, contentType: "application/json", prefer: "return=representation")
+        try await applySupabaseHeaders(to: &req, contentType: "application/json", prefer: "return=representation")
 
         let cardLast4 = parsed.cardLast4
-        let body: [String: Any] = [
+        let receiptAmount = parsed.receipt_amount ?? parsed.total
+        let receiptCurrency = parsed.receipt_currency ?? parsed.currency
+        var body: [String: Any] = [
             "merchant": jsonString(parsed.merchant),
             "date": jsonString(parsed.date),
             "total": jsonDecimal(parsed.total),
-            "currency": jsonString(parsed.currency),
-            "category": jsonString(parsed.category),
-            "card_last4": jsonString(cardLast4),
-            "card_bank": jsonString(parsed.card_bank),
+            "currency": jsonString(receiptCurrency),
             "file_url": jsonString(fileUrl),
             "raw_ocr_json": [
-                "raw_text": rawText ?? "",
+                "raw_text": rawText.map { AppSecurity.clippedSensitiveText($0) } ?? "",
                 "extracted_digits": parsed.extracted_digits ?? "",
+                "receipt_amount": receiptAmount?.description ?? "",
                 "card_last4": cardLast4 ?? "",
                 "card_bank": parsed.card_bank ?? "",
                 "category": parsed.category ?? "",
+                "default_currency": parsed.default_currency ?? "",
+                "receipt_currency": receiptCurrency ?? "",
+                "conversion_rate": parsed.conversion_rate?.description ?? "",
+                "converted_total": parsed.converted_total?.description ?? "",
                 "line_items": jsonLineItems(parsed.line_items)
             ] as Any
         ]
 
+        if includeOptionalColumns {
+            body["receipt_amount"] = jsonDecimal(receiptAmount)
+            body["default_currency"] = jsonString(parsed.default_currency)
+            body["receipt_currency"] = jsonString(receiptCurrency)
+            body["conversion_rate"] = jsonDecimal(parsed.conversion_rate)
+            body["converted_total"] = jsonDecimal(parsed.converted_total)
+            body["category"] = jsonString(parsed.category)
+            body["card_last4"] = jsonString(cardLast4)
+            body["card_bank"] = jsonString(parsed.card_bank)
+            if let userID = authSession?.userID {
+                body["user_id"] = userID
+            }
+        }
+
         req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
         let (d, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            let txt = String(data: d, encoding: .utf8) ?? ""
-            throw NSError(domain: "PostgREST", code: 1, userInfo: [NSLocalizedDescriptionKey: "Insert failed: \(txt)"])
+            throw postgrestError(prefix: "Insert failed", statusCode: (resp as? HTTPURLResponse)?.statusCode, data: d)
         }
 
         if let arr = try JSONSerialization.jsonObject(with: d, options: []) as? [[String: Any]], let first = arr.first,
@@ -225,5 +600,51 @@ actor SupabaseService {
         }
 
         throw NSError(domain: "PostgREST", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not parse inserted id"])
+    }
+}
+
+private final class SupabaseCredentialStore {
+    let service: String
+    let account: String
+
+    init(service: String, account: String) {
+        self.service = service
+        self.account = account
+    }
+
+    func loadSession() -> SupabaseAuthSession? {
+        var query = baseQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else {
+            return nil
+        }
+
+        return try? JSONDecoder().decode(SupabaseAuthSession.self, from: data)
+    }
+
+    func saveSession(_ session: SupabaseAuthSession) {
+        guard let data = try? JSONEncoder().encode(session) else { return }
+        deleteSession()
+
+        var query = baseQuery()
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    func deleteSession() {
+        SecItemDelete(baseQuery() as CFDictionary)
+    }
+
+    private func baseQuery() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
     }
 }

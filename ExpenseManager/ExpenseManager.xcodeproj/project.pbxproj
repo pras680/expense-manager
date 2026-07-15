@@ -6,8 +6,37 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		2F3654502FF034A0007B2A94 /* SMSShareExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 2F3654512FF034A0007B2A94 /* SMSShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		2F36545B2FF034A0007B2A94 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2F3653D12FEF6820007B2A94 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2F3654542FF034A0007B2A94;
+			remoteInfo = SMSShareExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		2F3654552FF034A0007B2A94 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				2F3654502FF034A0007B2A94 /* SMSShareExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		2F3653D92FEF6820007B2A94 /* ExpenseManager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ExpenseManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2F3654512FF034A0007B2A94 /* SMSShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SMSShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -17,6 +46,13 @@
 				Info.plist,
 			);
 			target = 2F3653D82FEF6820007B2A94 /* ExpenseManager */;
+		};
+		2F3654532FF034A0007B2A94 /* Exceptions for "SMSShareExtension" folder in "SMSShareExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2F3654542FF034A0007B2A94 /* SMSShareExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -29,10 +65,25 @@
 			path = ExpenseManager;
 			sourceTree = "<group>";
 		};
+		2F3654522FF034A0007B2A94 /* SMSShareExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2F3654532FF034A0007B2A94 /* Exceptions for "SMSShareExtension" folder in "SMSShareExtension" target */,
+			);
+			path = SMSShareExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		2F3653D62FEF6820007B2A94 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2F3654572FF034A0007B2A94 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -46,6 +97,7 @@
 			isa = PBXGroup;
 			children = (
 				2F3653DB2FEF6820007B2A94 /* ExpenseManager */,
+				2F3654522FF034A0007B2A94 /* SMSShareExtension */,
 				2F3653DA2FEF6820007B2A94 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +106,7 @@
 			isa = PBXGroup;
 			children = (
 				2F3653D92FEF6820007B2A94 /* ExpenseManager.app */,
+				2F3654512FF034A0007B2A94 /* SMSShareExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -68,10 +121,12 @@
 				2F3653D52FEF6820007B2A94 /* Sources */,
 				2F3653D62FEF6820007B2A94 /* Frameworks */,
 				2F3653D72FEF6820007B2A94 /* Resources */,
+				2F3654552FF034A0007B2A94 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				2F36545C2FF034A0007B2A94 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				2F3653DB2FEF6820007B2A94 /* ExpenseManager */,
@@ -82,6 +137,28 @@
 			productName = ExpenseManager;
 			productReference = 2F3653D92FEF6820007B2A94 /* ExpenseManager.app */;
 			productType = "com.apple.product-type.application";
+		};
+		2F3654542FF034A0007B2A94 /* SMSShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2F3654592FF034A0007B2A94 /* Build configuration list for PBXNativeTarget "SMSShareExtension" */;
+			buildPhases = (
+				2F3654562FF034A0007B2A94 /* Sources */,
+				2F3654572FF034A0007B2A94 /* Frameworks */,
+				2F3654582FF034A0007B2A94 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2F3654522FF034A0007B2A94 /* SMSShareExtension */,
+			);
+			name = SMSShareExtension;
+			packageProductDependencies = (
+			);
+			productName = SMSShareExtension;
+			productReference = 2F3654512FF034A0007B2A94 /* SMSShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -94,6 +171,9 @@
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					2F3653D82FEF6820007B2A94 = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					2F3654542FF034A0007B2A94 = {
 						CreatedOnToolsVersion = 26.5;
 					};
 				};
@@ -113,12 +193,20 @@
 			projectRoot = "";
 			targets = (
 				2F3653D82FEF6820007B2A94 /* ExpenseManager */,
+				2F3654542FF034A0007B2A94 /* SMSShareExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		2F3653D72FEF6820007B2A94 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		2F3654582FF034A0007B2A94 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -135,7 +223,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		2F3654562FF034A0007B2A94 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2F36545C2FF034A0007B2A94 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2F3654542FF034A0007B2A94 /* SMSShareExtension */;
+			targetProxy = 2F36545B2FF034A0007B2A94 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		2F3653E22FEF6822007B2A94 /* Debug */ = {
@@ -268,7 +371,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 624HVCW8HW;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ExpenseManager/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "The camera is needed to scan bills and invoices so receipt images can be processed.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -301,7 +405,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 624HVCW8HW;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ExpenseManager/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "The camera is needed to scan bills and invoices so receipt images can be processed.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -325,6 +430,58 @@
 			};
 			name = Release;
 		};
+		2F36545A2FF034A0007B2A94 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 624HVCW8HW;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SMSShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prasanna.ExpenseManager.SMSShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		2F36545D2FF034A0007B2A94 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 624HVCW8HW;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = SMSShareExtension/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.prasanna.ExpenseManager.SMSShareExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -342,6 +499,15 @@
 			buildConfigurations = (
 				2F3653E52FEF6822007B2A94 /* Debug */,
 				2F3653E62FEF6822007B2A94 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2F3654592FF034A0007B2A94 /* Build configuration list for PBXNativeTarget "SMSShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2F36545A2FF034A0007B2A94 /* Debug */,
+				2F36545D2FF034A0007B2A94 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
