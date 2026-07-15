@@ -10,14 +10,24 @@ struct PaymentMethod: Identifiable, Equatable {
 actor PaymentMappingService {
     let supabaseUrl: URL
     let supabaseAnonKey: String
+    private var authAccessToken: String?
 
     init(supabaseUrl: String, supabaseAnonKey: String) {
         self.supabaseUrl = URL(string: supabaseUrl)!
         self.supabaseAnonKey = supabaseAnonKey
     }
 
-    private var canUseBearerAuthorization: Bool {
-        supabaseAnonKey.split(separator: ".").count == 3
+    func setAuthAccessToken(_ token: String?) {
+        authAccessToken = token
+    }
+
+    private func applyHeaders(to request: inout URLRequest) {
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        if let authAccessToken {
+            request.setValue("Bearer \(authAccessToken)", forHTTPHeaderField: "Authorization")
+        } else {
+            request.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        }
     }
 
     // Query payment_methods table for a matching last_digits.
@@ -28,7 +38,7 @@ actor PaymentMappingService {
         }
 
         components.queryItems = [
-            URLQueryItem(name: "select", value: "*"),
+            URLQueryItem(name: "select", value: "id,last_digits,bank_name,card_name"),
             URLQueryItem(name: "last_digits", value: "eq.\(normalizedLast4)")
         ]
         guard let url = components.url else {
@@ -37,10 +47,7 @@ actor PaymentMappingService {
 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
-        req.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        if canUseBearerAuthorization {
-            req.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        }
+        applyHeaders(to: &req)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -79,7 +86,7 @@ actor PaymentMappingService {
         }
 
         components.queryItems = [
-            URLQueryItem(name: "select", value: "*"),
+            URLQueryItem(name: "select", value: "id,last_digits,bank_name,card_name"),
             URLQueryItem(name: "order", value: "bank_name.asc,last_digits.asc")
         ]
         guard let url = components.url else {
@@ -88,10 +95,7 @@ actor PaymentMappingService {
 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
-        req.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        if canUseBearerAuthorization {
-            req.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        }
+        applyHeaders(to: &req)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {

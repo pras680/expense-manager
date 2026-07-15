@@ -73,7 +73,7 @@ struct SpendingReportView: View {
             Text(title)
                 .font(.footnote.weight(.semibold))
                 .foregroundColor(.secondary)
-            Text(value.formatted(.currency(code: Invoice.defaultCurrency)))
+            Text(value.formatted(.currency(code: store.defaultCurrencyCode)))
                 .font(.title3.weight(.bold))
                 .foregroundColor(color)
         }
@@ -96,7 +96,7 @@ struct SpendingReportView: View {
                     ForEach(Array(store.weeklySpendByDay.enumerated()), id: \.offset) { item in
                         let bar = item.element
                         VStack(spacing: 8) {
-                            Text(bar.amount.formatted(.currency(code: Invoice.defaultCurrency)))
+                            Text(bar.amount.formatted(.currency(code: store.defaultCurrencyCode)))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
@@ -170,7 +170,7 @@ struct SpendingReportView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        Text(summary.amount.formatted(.currency(code: Invoice.defaultCurrency)))
+                        Text(summary.amount.formatted(.currency(code: store.defaultCurrencyCode)))
                             .font(.subheadline.bold())
                     }
                     .padding()
@@ -223,8 +223,15 @@ struct SpendingReportView: View {
                         }
                     }
                     Spacer()
-                    Text(invoice.total.map { $0.formatted(.currency(code: invoice.currency ?? Invoice.defaultCurrency)) } ?? "—")
-                        .font(.subheadline.bold())
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Text(invoice.reportingTotal(defaultCurrencyCode: store.defaultCurrencyCode).map { $0.formatted(.currency(code: store.defaultCurrencyCode)) } ?? "SGD pending")
+                            .font(.subheadline.bold())
+                        if let original = invoice.displayReceiptAmount {
+                            Text("Receipt: \(original.formatted(.currency(code: invoice.displayReceiptCurrency)))")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
                 .padding()
                 .background(Color(.systemBackground).opacity(0.95))
