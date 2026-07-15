@@ -4,8 +4,16 @@ struct Invoice: Identifiable, Codable {
     var id: UUID = UUID()
     var merchant: String? = nil
     var date: Date? = nil
+    /// Reporting amount in the app default currency. For this app, totals are shown in SGD by default.
     var total: Decimal? = nil
+    /// Original amount printed on the receipt before default-currency conversion.
+    var receiptAmount: Decimal? = nil
+    /// Original receipt currency. Kept for backward compatibility with existing Supabase `currency` rows.
     var currency: String? = nil
+    var defaultCurrency: String? = nil
+    var receiptCurrency: String? = nil
+    var conversionRate: Decimal? = nil
+    var convertedTotal: Decimal? = nil
     var category: String? = nil
     var cardLast4: String? = nil
     var cardBank: String? = nil
@@ -50,17 +58,26 @@ extension Invoice {
         "Health",
         "Home",
         "Subscriptions",
+        "Services",
+        "Credit Card Bill Payment",
         "Miscellaneous"
     ]
 
     init(from parsed: ParsedReceipt, rawText: String, fileUrl: String? = nil) {
         let last4 = parsed.cardLast4 ?? PaymentMappingService.normalizedLast4(from: parsed.extracted_digits)
+        let receiptCurrency = parsed.receipt_currency ?? parsed.currency
+        let receiptAmount = parsed.receipt_amount ?? parsed.total
         self.init(
             id: UUID(),
             merchant: parsed.merchant,
             date: Invoice.parseDate(parsed.date),
-            total: parsed.total,
-            currency: parsed.currency,
+            total: parsed.converted_total ?? parsed.total,
+            receiptAmount: receiptAmount,
+            currency: receiptCurrency,
+            defaultCurrency: parsed.default_currency,
+            receiptCurrency: receiptCurrency,
+            conversionRate: parsed.conversion_rate,
+            convertedTotal: parsed.converted_total,
             category: parsed.category,
             cardLast4: last4,
             cardBank: parsed.card_bank,
@@ -75,35 +92,91 @@ extension Invoice {
             return nil
         }
 
+        let rawJSON = dictionary["raw_ocr_json"] as? [String: Any]
         let merchant = dictionary["merchant"] as? String
         let dateString = dictionary["date"] as? String
         let fileUrl = dictionary["file_url"] as? String
         let currency = dictionary["currency"] as? String
-        let category = dictionary["category"] as? String
-        let cardLast4 = dictionary["card_last4"] as? String
-        let cardBank = dictionary["card_bank"] as? String
+        let defaultCurrency = dictionary["default_currency"] as? String ?? Invoice.stringValue(from: rawJSON?["default_currency"])
+        let receiptCurrency = dictionary["receipt_currency"] as? String ?? Invoice.stringValue(from: rawJSON?["receipt_currency"]) ?? currency
+        let category = dictionary["category"] as? String ?? Invoice.stringValue(from: rawJSON?["category"])
+        let cardLast4 = dictionary["card_last4"] as? String ?? Invoice.stringValue(from: rawJSON?["card_last4"])
+        let cardBank = dictionary["card_bank"] as? String ?? Invoice.stringValue(from: rawJSON?["card_bank"])
 
-        let total: Decimal?
-        if let number = dictionary["total"] as? NSNumber {
-            total = number.decimalValue
-        } else if let string = dictionary["total"] as? String {
-            total = Decimal(string: string)
-        } else {
-            total = nil
-        }
+        let storedTotal = Invoice.decimalValue(from: dictionary["total"])
+        let receiptAmount = Invoice.decimalValue(from: dictionary["receipt_amount"])
+            ?? Invoice.decimalValue(from: rawJSON?["receipt_amount"])
+            ?? storedTotal
+        let conversionRate = Invoice.decimalValue(from: dictionary["conversion_rate"])
+            ?? Invoice.decimalValue(from: rawJSON?["conversion_rate"])
+        let convertedTotal = Invoice.decimalValue(from: dictionary["converted_total"])
+            ?? Invoice.decimalValue(from: rawJSON?["converted_total"])
+        let targetCurrency = CurrencyConversionService.normalizedCurrency(defaultCurrency) ?? Invoice.defaultCurrency
+        let sourceCurrency = CurrencyConversionService.normalizedCurrency(receiptCurrency ?? currency) ?? targetCurrency
+        let reportingTotal = convertedTotal ?? (sourceCurrency == targetCurrency ? storedTotal : nil)
+        let rawText = Invoice.stringValue(from: rawJSON?["raw_text"]) ?? ""
 
         self.init(
             id: idValue,
             merchant: merchant,
             date: Invoice.parseDate(dateString),
-            total: total,
-            currency: currency,
+            total: reportingTotal,
+            receiptAmount: receiptAmount,
+            currency: receiptCurrency ?? currency,
+            defaultCurrency: defaultCurrency,
+            receiptCurrency: receiptCurrency,
+            conversionRate: conversionRate,
+            convertedTotal: convertedTotal,
             category: category,
             cardLast4: cardLast4,
             cardBank: cardBank,
-            rawText: "",
+            rawText: rawText,
             fileUrl: fileUrl
         )
+    }
+
+    var reportingTotal: Decimal? {
+        total ?? convertedTotal
+    }
+
+    var reportingCurrency: String {
+        defaultCurrency?.nilIfEmpty ?? Invoice.defaultCurrency
+    }
+
+    func reportingTotal(defaultCurrencyCode: String) -> Decimal? {
+        total ?? convertedTotal
+    }
+
+    func reportingCurrency(defaultCurrencyCode: String) -> String {
+        CurrencyConversionService.normalizedCurrency(defaultCurrencyCode) ?? reportingCurrency
+    }
+
+    var displayReceiptCurrency: String {
+        receiptCurrency?.nilIfEmpty ?? currency?.nilIfEmpty ?? Invoice.defaultCurrency
+    }
+
+    var displayReceiptAmount: Decimal? {
+        receiptAmount ?? total
+    }
+
+    static func stringValue(from value: Any?) -> String? {
+        if let string = value as? String {
+            return string.nilIfEmpty
+        }
+        if let number = value as? NSNumber {
+            return number.stringValue.nilIfEmpty
+        }
+        return nil
+    }
+
+    static func decimalValue(from value: Any?) -> Decimal? {
+        if let number = value as? NSNumber {
+            return number.decimalValue
+        }
+        if let string = value as? String {
+            return Decimal(string: string)
+        }
+        return nil
     }
 
     static func parseDate(_ raw: String?) -> Date? {
@@ -155,7 +228,11 @@ struct InvoiceParser {
     static func parse(from text: String) -> Invoice {
         var invoice = Invoice(rawText: text)
 
-        if let merchantLine = text
+        if let smsMerchant = extractSMSMerchant(from: text) {
+            invoice.merchant = smsMerchant
+        } else if let payNowRecipient = extractPayNowRecipient(from: text) {
+            invoice.merchant = payNowRecipient
+        } else if let merchantLine = text
             .components(separatedBy: .newlines)
             .map({ $0.trimmingCharacters(in: .whitespaces) })
             .first(where: { !$0.isEmpty }) {
@@ -178,19 +255,29 @@ struct InvoiceParser {
 
     static func inferCategory(from text: String, merchant: String?) -> String {
         let haystack = "\(merchant ?? "") \n\(text)".lowercased()
+
+        if isCreditCardBillPayment(text: haystack) {
+            return "Credit Card Bill Payment"
+        }
+
+        if isPayNowTransfer(text: haystack), payNowRecipientLooksLikePerson(text: haystack, merchant: merchant) {
+            return "Services"
+        }
+
         let categoryKeywords: [(String, [String])] = [
             ("EV Charging", ["evgo", "chargepoint", "electrify america", "tesla supercharger", "supercharger", "ev charging", "charging station", "kwh"]),
             ("Fuel", ["shell", "chevron", "exxon", "mobil", "bp", "arco", "petro", "gasoline", "diesel", "fuel", "gallon"]),
-            ("Groceries", ["grocery", "groceries", "supermarket", "trader joe", "whole foods", "safeway", "kroger", "costco", "walmart", "target", "produce", "milk", "bread", "eggs"]),
-            ("Food & Dining", ["restaurant", "cafe", "coffee", "pizza", "burger", "doordash", "ubereats", "grubhub", "bakery", "bar", "dining"]),
-            ("Electronics", ["apple", "best buy", "electronics", "computer", "laptop", "phone", "charger", "cable", "headphones", "monitor"]),
+            ("Groceries", ["grocery", "groceries", "supermarket", "fairprice", "ntuc", "cold storage", "sheng siong", "giant", "don don donki", "trader joe", "whole foods", "safeway", "kroger", "costco", "walmart", "target", "produce", "milk", "bread", "eggs"]),
+            ("Food & Dining", ["restaurant", "cafe", "coffee", "kopi", "kopitiam", "food court", "foodcourt", "hawker", "hawker centre", "hawker center", "food republic", "koufu", "toast box", "ya kun", "mcdonald", "kfc", "burger king", "subway", "pizza", "burger", "doordash", "ubereats", "grabfood", "foodpanda", "deliveroo", "bakery", "bar", "bistro", "dining", "eatery", "canteen", "meal"]),
+            ("Electronics", ["apple", "best buy", "challenger", "courts", "gain city", "electronics", "computer", "laptop", "phone", "charger", "cable", "headphones", "monitor"]),
             ("Clothing", ["clothing", "apparel", "shirt", "pants", "shoes", "nike", "adidas", "uniqlo", "zara", "h&m", "laundry"]),
-            ("Entertainment", ["cinema", "movie", "theater", "ticket", "concert", "netflix", "spotify", "game", "gaming", "book"]),
-            ("Utilities", ["utility", "electric", "water", "internet", "phone bill", "xfinity", "comcast", "verizon", "at&t"]),
-            ("Travel", ["hotel", "airline", "uber", "lyft", "taxi", "parking", "airport", "train", "transit", "rental car"]),
-            ("Health", ["pharmacy", "cvs", "walgreens", "medical", "doctor", "dental", "clinic", "fitness", "gym"]),
-            ("Home", ["home depot", "lowes", "hardware", "furniture", "garden", "paint", "tools"]),
-            ("Subscriptions", ["subscription", "membership", "monthly", "annual plan", "renewal"])
+            ("Entertainment", ["cinema", "movie", "theater", "ticket", "concert", "netflix", "spotify", "game", "gaming", "book", "klook"]),
+            ("Utilities", ["utility", "electric", "water", "internet", "phone bill", "singtel", "starhub", "m1", "sp services", "xfinity", "comcast", "verizon", "at&t"]),
+            ("Travel", ["flight", "flight itinerary", "travel itinerary", "itinerary", "e-ticket", "air ticket", "booking confirmation", "boarding", "airport", "airline", "scoot", "singapore airlines", "sq ", "jetstar", "airasia", "emirates", "qatar airways", "hotel", "grab", "gojek", "uber", "lyft", "taxi", "parking", "train", "transit", "mrt", "rental car"]),
+            ("Health", ["pharmacy", "guardian", "watsons", "cvs", "walgreens", "medical", "doctor", "dental", "clinic", "fitness", "gym"]),
+            ("Home", ["home depot", "lowes", "ikea", "hardware", "furniture", "garden", "paint", "tools"]),
+            ("Subscriptions", ["subscription", "membership", "monthly", "annual plan", "renewal"]),
+            ("Services", ["service", "repair", "cleaning", "salon", "spa", "tuition", "lesson", "consultation", "maintenance", "plumber", "electrician", "handyman"])
         ]
 
         for (category, keywords) in categoryKeywords {
@@ -199,7 +286,136 @@ struct InvoiceParser {
             }
         }
 
+        if isPayNowTransfer(text: haystack) {
+            return payNowRecipientLooksLikeBusiness(text: haystack, merchant: merchant) ? "Miscellaneous" : "Services"
+        }
+
         return "Miscellaneous"
+    }
+
+    static func isCreditCardBillPayment(text: String) -> Bool {
+        let hasCard = text.contains("credit card") || text.contains("card bill") || text.contains("card payment") || text.contains("visa") || text.contains("mastercard") || text.contains("amex")
+        let hasPayment = text.contains("bill payment") || text.contains("payment received") || text.contains("payment confirmation") || text.contains("payment successful") || text.contains("paid")
+        let hasBankContext = text.contains("minimum payment") || text.contains("statement") || text.contains("outstanding") || text.contains("card account") || text.contains("amount due")
+        return hasCard && hasPayment && hasBankContext
+    }
+
+    static func isPayNowTransfer(text: String) -> Bool {
+        let normalized = text.lowercased()
+        return [
+            "paynow",
+            "pay now",
+            "paylah",
+            "fund transfer",
+            "funds transfer",
+            "bank transfer",
+            "fast transfer",
+            "transfer successful",
+            "successful transfer",
+            "payment alert",
+            "transaction alert",
+            "transaction notification",
+            "debit advice",
+            "paid to",
+            "sent to",
+            "transferred to",
+            "uen"
+        ].contains { normalized.contains($0) }
+    }
+
+    static func looksLikeExpenseSMS(text: String) -> Bool {
+        let normalized = text.lowercased()
+        let hasMoney = findLargestAmount(in: text) != nil || normalized.contains("sgd") || normalized.contains("s$")
+        let hasTransactionCue = [
+            "spent",
+            "purchase",
+            "transaction",
+            "payment",
+            "paid",
+            "debit",
+            "charged",
+            "card ending",
+            "card no",
+            "paynow",
+            "paylah",
+            "transfer",
+            "sent to",
+            "paid to",
+            "merchant"
+        ].contains { normalized.contains($0) }
+        let hasNonExpenseCue = [
+            "otp",
+            "one-time password",
+            "verification code",
+            "login",
+            "balance enquiry",
+            "available balance only"
+        ].contains { normalized.contains($0) }
+        return hasMoney && hasTransactionCue && !hasNonExpenseCue
+    }
+
+    static func extractSMSMerchant(from text: String) -> String? {
+        let patterns = [
+            #"(?:at|with|merchant)[:\s]+([a-z0-9 .&'*/()/-]{3,80})"#,
+            #"(?:spent|charged|debited|purchase(?:d)?|transaction)\s+(?:of\s+)?(?:sgd|s\$)?\s*[0-9,.]+\s+(?:at|with|to)\s+([a-z0-9 .&'*/()/-]{3,80})"#,
+            #"(?:card|acct|account).*?(?:used|charged).*?(?:at|with)\s+([a-z0-9 .&'*/()/-]{3,80})"#,
+            #"(?:you paid|payment to|paid to|sent to|transferred to)\s+([a-z0-9 .&'*/()/-]{3,80})"#
+        ]
+        let ns = text as NSString
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            guard let match = regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: ns.length)), match.numberOfRanges > 1 else { continue }
+            let candidate = ns.substring(with: match.range(at: 1))
+                .replacingOccurrences(of: #"\s+(?:on|at\s+\d|for|amount|sgd|s\$|ref|reference|txn|transaction|card|ending|available|balance).*$"#, with: "", options: [.regularExpression, .caseInsensitive])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let cleaned = cleanedMerchantName(candidate) {
+                return cleaned
+            }
+        }
+        return nil
+    }
+
+    private static func cleanedMerchantName(_ raw: String) -> String? {
+        let trimmed = raw
+            .replacingOccurrences(of: #"[^a-zA-Z0-9 .&'*/()/-]"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let stopValues = ["sgd", "s", "amount", "transaction", "payment", "purchase", "card", "account", "acct"]
+        guard trimmed.count >= 3, !stopValues.contains(trimmed.lowercased()) else { return nil }
+        return trimmed
+    }
+
+    static func payNowRecipientLooksLikeBusiness(text: String, merchant: String?) -> Bool {
+        let candidate = (merchant ?? extractPayNowRecipient(from: text) ?? "").lowercased()
+        let businessTerms = ["pte", "ltd", "llp", "co.", "company", "enterprise", "trading", "services", "service", "restaurant", "cafe", "kopitiam", "food court", "foodcourt", "hawker", "koufu", "food republic", "store", "shop", "mart", "market", "salon", "clinic", "tuition", "school", "studio", "repair", "laundry", "bakery", "food", "technology", "solutions", "uen"]
+        return businessTerms.contains { candidate.contains($0) || text.contains($0) }
+    }
+
+    static func payNowRecipientLooksLikePerson(text: String, merchant: String?) -> Bool {
+        if payNowRecipientLooksLikeBusiness(text: text, merchant: merchant) { return false }
+        let candidate = (merchant ?? extractPayNowRecipient(from: text) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = candidate.split(separator: " ").filter { $0.allSatisfy { $0.isLetter || $0 == "." } }
+        return (1...4).contains(words.count)
+    }
+
+    static func extractPayNowRecipient(from text: String) -> String? {
+        let patterns = [
+            #"(?:to|recipient|payee|merchant|beneficiary)[:\s]+([a-z0-9 .&'/-]{3,80})"#,
+            #"you have paid\s+([a-z0-9 .&'/-]{3,80})"#,
+            #"(?:payment|paid|sent|transferred)\s+to\s+([a-z0-9 .&'/-]{3,80})"#,
+            #"(?:funds?|bank|fast)\s+transfer\s+to\s+([a-z0-9 .&'/-]{3,80})"#,
+            #"(?:paynow|paylah)\s+(?:to|recipient|payee|merchant)[:\s]+([a-z0-9 .&'/-]{3,80})"#
+        ]
+        let ns = text as NSString
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
+            if let match = regex.firstMatch(in: text, options: [], range: NSRange(location: 0, length: ns.length)), match.numberOfRanges > 1 {
+                return ns.substring(with: match.range(at: 1))
+                    .replacingOccurrences(of: #"\s+(?:on|at|for|amount|sgd|s\$).*$"#, with: "", options: [.regularExpression, .caseInsensitive])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return nil
     }
 
     static func findDate(in text: String) -> Date? {

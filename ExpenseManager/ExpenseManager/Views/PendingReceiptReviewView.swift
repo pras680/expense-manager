@@ -6,6 +6,7 @@ struct PendingReceiptReviewView: View {
     let onConfirm: (Invoice) async -> Void
     let onDiscard: () -> Void
 
+    @FocusState private var focusedField: ReviewField?
     @State private var merchant: String = ""
     @State private var date: Date = Date()
     @State private var total: String = ""
@@ -15,12 +16,19 @@ struct PendingReceiptReviewView: View {
     @State private var cardBank: String = ""
     @State private var rawText: String = ""
 
+    private enum ReviewField: Hashable {
+        case merchant
+        case total
+        case rawText
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 18) {
                     header
                     extractedSummary
+                    topActionButtons
                     fieldsCard
                     rawTextCard
                     actionButtons
@@ -41,8 +49,8 @@ struct PendingReceiptReviewView: View {
                 guard let pending = pending else { return }
                 merchant = pending.invoice.merchant ?? ""
                 date = pending.invoice.date ?? Date()
-                total = pending.invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
-                currency = pending.invoice.currency ?? Invoice.defaultCurrency
+                total = pending.invoice.displayReceiptAmount.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
+                currency = pending.invoice.displayReceiptCurrency
                 category = pending.invoice.category ?? "Miscellaneous"
                 cardLast4 = pending.invoice.cardLast4 ?? ""
                 cardBank = pending.invoice.cardBank ?? ""
@@ -70,7 +78,7 @@ struct PendingReceiptReviewView: View {
     private var extractedSummary: some View {
         HStack(spacing: 12) {
             summaryPill(title: "Merchant", value: merchant.isEmpty ? "Missing" : merchant, tint: .blue)
-            summaryPill(title: "Total", value: total.isEmpty ? "Missing" : total, tint: .green)
+            summaryPill(title: "Receipt Amount", value: total.isEmpty ? "Missing" : "\(currency) \(total)", tint: .green)
             summaryPill(title: "Card", value: cardSummary, tint: .orange)
         }
     }
@@ -92,6 +100,32 @@ struct PendingReceiptReviewView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
+    private var topActionButtons: some View {
+        HStack(spacing: 12) {
+            Button(role: .destructive, action: onDiscard) {
+                Label("Reject", systemImage: "xmark.circle.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.bordered)
+
+            Button(action: approve) {
+                Label("Save", systemImage: "checkmark.circle.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+            .disabled(!canApprove)
+        }
+        .padding(12)
+        .background(Color(.systemBackground).opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .shadow(color: .black.opacity(0.05), radius: 10, y: 5)
+    }
+
     private var fieldsCard: some View {
         VStack(spacing: 14) {
             styledTextField("Merchant", text: $merchant, icon: "storefront")
@@ -102,9 +136,9 @@ struct PendingReceiptReviewView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
 
             HStack(spacing: 12) {
-                styledTextField("Total", text: $total, icon: "dollarsign.circle")
+                styledTextField("Receipt Amount", text: $total, icon: "dollarsign.circle")
                     .keyboardType(.decimalPad)
-                Picker("Currency", selection: $currency) {
+                Picker("Receipt Currency", selection: $currency) {
                     ForEach(Invoice.commonCurrencies, id: \.self) { currency in
                         Text(currency).tag(currency)
                     }
@@ -143,6 +177,7 @@ struct PendingReceiptReviewView: View {
                 .font(.headline)
             TextEditor(text: $rawText)
                 .font(.callout.monospaced())
+                .focused($focusedField, equals: .rawText)
                 .frame(minHeight: 190)
                 .padding(10)
                 .background(Color(.systemBackground).opacity(0.94))
@@ -163,7 +198,7 @@ struct PendingReceiptReviewView: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)
-            .disabled(merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Decimal(string: total.replacingOccurrences(of: ",", with: "")) == nil)
+            .disabled(!canApprove)
 
             Button(role: .destructive, action: onDiscard) {
                 Label("Discard Receipt", systemImage: "trash")
@@ -175,12 +210,24 @@ struct PendingReceiptReviewView: View {
         }
     }
 
+    private var canApprove: Bool {
+        !merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && Decimal(string: total.replacingOccurrences(of: ",", with: "")) != nil
+    }
+
     private func approve() {
+        focusedField = nil
+        dismissKeyboard()
         guard var invoice = pending?.invoice else { return }
         invoice.merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
         invoice.date = date
-        invoice.total = Decimal(string: total.replacingOccurrences(of: ",", with: ""))
-        invoice.currency = currency.trimmingCharacters(in: .whitespacesAndNewlines)
+        invoice.receiptAmount = Decimal(string: total.replacingOccurrences(of: ",", with: ""))
+        invoice.total = nil
+        let selectedCurrency = currency.trimmingCharacters(in: .whitespacesAndNewlines)
+        invoice.currency = selectedCurrency
+        invoice.receiptCurrency = selectedCurrency
+        invoice.defaultCurrency = store.defaultCurrencyCode
+        invoice.conversionRate = nil
+        invoice.convertedTotal = nil
         invoice.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
         invoice.cardLast4 = PaymentMappingService.normalizedLast4(from: cardLast4)
         invoice.cardBank = cardBank.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
@@ -206,10 +253,16 @@ struct PendingReceiptReviewView: View {
             Image(systemName: icon)
                 .foregroundStyle(.blue)
             TextField(title, text: text)
+                .focused($focusedField, equals: title == "Total" ? .total : .merchant)
+                .submitLabel(.done)
         }
         .padding(14)
         .background(Color(.systemBackground).opacity(0.94))
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private func menuPicker(title: String, selection: Binding<String>, options: [String], icon: String) -> some View {

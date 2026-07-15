@@ -8,7 +8,11 @@ Repository:
 
 `/Users/prasannaganesan/git_repos/expense-manager`
 
-Swift source folder to add to a new Xcode iOS app project:
+Canonical Xcode app source:
+
+`/Users/prasannaganesan/git_repos/expense-manager/ExpenseManager/ExpenseManager`
+
+Legacy source snapshot, not maintained for security fixes:
 
 `/Users/prasannaganesan/git_repos/expense-manager/ios-app`
 
@@ -16,36 +20,20 @@ Supabase Edge Function:
 
 `/Users/prasannaganesan/git_repos/expense-manager/supabase-edge/parse-receipt`
 
-## Recommended fresh Xcode setup
+## Recommended Xcode setup
 
-1. Open Xcode.
-2. Choose **File > New > Project...**.
-3. Select **iOS > App**.
-4. Product Name: `Expense Manager`.
-5. Interface: `SwiftUI`.
-6. Language: `Swift`.
-7. Do **not** select SwiftData.
-8. Save the project somewhere clean, preferably inside this repo or next to it.
-9. Delete the default generated `ContentView.swift` and generated `App.swift` from the Xcode project.
-10. Drag these files/folders into the Xcode project navigator and check **Copy items if needed** only if the project is outside this repo:
-    - `ios-app/ExpenseManagerApp.swift`
-    - `ios-app/Info.plist`
-    - `ios-app/Models`
-    - `ios-app/Services`
-    - `ios-app/Views`
-11. In target settings, make sure `Info.plist` points to `ios-app/Info.plist` if you use this plist.
-12. Build and run the `Expense Manager` target.
+Use the checked-in project at `ExpenseManager/ExpenseManager.xcodeproj` with the `ExpenseManager` scheme. The maintained app source is under `ExpenseManager/ExpenseManager`; do not start new work from the legacy `ios-app` snapshot unless it is first synchronized with the maintained source.
 
 ## Files included
 
-- `ExpenseManagerApp.swift` — app entry point.
-- `Views/ContentView.swift` — launches the tabbed app UI.
-- `Views/MainTabView.swift` — Receipts, Report, and Tools tabs.
-- `Views/ReceiptsDashboardView.swift` — redesigned dashboard.
-- `Views/ReceiptStore.swift` — scanner, OCR, sample trial, and Supabase workflow.
-- `Services/OCRService.swift` — Apple Vision OCR.
-- `Services/DocumentScanner.swift` — camera integration.
-- `Services/SupabaseService.swift` — REST, storage, and Edge Function calls.
+- `ExpenseManager/ExpenseManager/ExpenseManagerApp.swift` — app entry point.
+- `ExpenseManager/ExpenseManager/Views/ContentView.swift` — launches the tabbed app UI.
+- `ExpenseManager/ExpenseManager/Views/MainTabView.swift` — Receipts, Report, and Tools tabs.
+- `ExpenseManager/ExpenseManager/Views/ReceiptsDashboardView.swift` — redesigned dashboard.
+- `ExpenseManager/ExpenseManager/Views/ReceiptStore.swift` — scanner, OCR, Gmail, SMS, currency, and Supabase workflow.
+- `ExpenseManager/ExpenseManager/Services/OCRService.swift` — Apple Vision OCR.
+- `ExpenseManager/ExpenseManager/Services/DocumentScanner.swift` — camera integration.
+- `ExpenseManager/ExpenseManager/Services/SupabaseService.swift` — REST, storage, and Edge Function calls.
 - `supabase-edge/parse-receipt/index.ts` — Anthropic parsing Edge Function.
 
 ## Test flow
@@ -53,3 +41,11 @@ Supabase Edge Function:
 Use the **Tools** tab in the app and tap **Run Sample OCR Trial**. It generates a sample receipt image, runs Vision OCR, opens review, then saves to Supabase when approved.
 
 If DB save fails, check Supabase RLS policies for the `receipts` table. If image upload fails, check Storage policies for the `receipt-documents` bucket.
+
+## Security notes
+
+- The iOS app uses a Supabase publishable/anon key. Do not put a Supabase service-role key in the app bundle.
+- Gmail access is requested with the read-only scope only: `https://www.googleapis.com/auth/gmail.readonly`.
+- For production RLS, add Supabase Auth and per-user `user_id` policies. Without Auth, `auth.uid()` is `NULL`; broad `anon` policies are not safe for private receipt data.
+- See `supabase-edge/payment-card-schema.sql` for example Auth-backed table and storage RLS policies.
+- The Edge Function should return generic parser errors to clients and keep provider details out of client responses.
