@@ -20,24 +20,6 @@ enum ReportKind: String, CaseIterable, Identifiable {
             return "View total spend, this month, receipts, and weekly trend."
         }
     }
-
-    var icon: String {
-        switch self {
-        case .category: return "tag.fill"
-        case .card: return "creditcard.fill"
-        case .month: return "calendar"
-        case .overview: return "chart.line.uptrend.xyaxis"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .category: return .purple
-        case .card: return .orange
-        case .month: return .blue
-        case .overview: return .green
-        }
-    }
 }
 
 struct ReportDashboardView: View {
@@ -45,115 +27,90 @@ struct ReportDashboardView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: AppTheme.space4) {
                 header
-                cleanSummary
+                RuleLine()
+                summaryGrid
+                SectionLabel(text: "View Report")
                 reportOptions
             }
-            .padding()
+            .padding(AppTheme.space4)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle("Reports")
+        .background(AppTheme.bg.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: AppTheme.space1) {
             Text("Reports")
-                .font(.largeTitle.weight(.black))
-            Text("Choose a report type to open a clean stats page.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(AppFont.largeTitle)
+                .foregroundStyle(AppTheme.text)
+            Text("Choose a report to open a clean stats page.")
+                .font(AppFont.subhead)
+                .foregroundStyle(AppTheme.textMuted)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(22)
-        .background(LinearGradient(colors: [Color.blue.opacity(0.18), Color.purple.opacity(0.14)], startPoint: .topLeading, endPoint: .bottomTrailing))
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
     }
 
-    private var cleanSummary: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Summary")
-                .font(.headline)
-            VStack(spacing: 10) {
-                summaryRow("Total Spend", value: store.totalSpend.formatted(.currency(code: Invoice.defaultCurrency)), tint: .purple)
-                summaryRow("This Month", value: store.monthlySpend.formatted(.currency(code: Invoice.defaultCurrency)), tint: .blue)
-                summaryRow("Receipts", value: "\(store.receiptCount)", tint: .green)
-            }
+    private var summaryGrid: some View {
+        HStack(spacing: 1) {
+            StatCell(title: "Total", value: store.totalSpend.formatted(.currency(code: Invoice.defaultCurrency)), valueSize: 15)
+            StatCell(title: "Month", value: store.monthlySpend.formatted(.currency(code: Invoice.defaultCurrency)), valueSize: 15)
+            StatCell(title: "Receipts", value: "\(store.receiptCount)", valueSize: 15)
         }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-    }
-
-    private func summaryRow(_ title: String, value: String, tint: Color) -> some View {
-        HStack(spacing: 12) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 16)
-            Text(value)
-                .font(.title3.weight(.bold))
-                .foregroundStyle(tint)
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .monospacedDigit()
-        }
-        .padding(14)
-        .background(Color(.systemBackground).opacity(0.95))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(AppTheme.divider)
     }
 
     private var reportOptions: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("View Report")
-                .font(.headline)
-
+        RuledStack {
             ForEach(ReportKind.allCases) { kind in
-                NavigationLink {
-                    ReportDetailView(store: store, kind: kind)
-                } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: kind.icon)
-                            .font(.headline)
-                            .foregroundStyle(kind.tint)
-                            .frame(width: 44, height: 44)
-                            .background(kind.tint.opacity(0.14))
-                            .clipShape(Circle())
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(kind.rawValue)
-                                .font(.headline)
-                                .foregroundStyle(.primary)
-                            Text(kind.subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                RuledRow {
+                    NavigationLink {
+                        ReportDetailView(store: store, kind: kind)
+                    } label: {
+                        HStack(spacing: AppTheme.space3) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(kind.rawValue)
+                                    .font(AppFont.headline)
+                                    .foregroundStyle(AppTheme.text)
+                                Text(kind.subtitle)
+                                    .font(AppFont.subhead)
+                                    .foregroundStyle(AppTheme.textMuted)
+                                    .lineLimit(2)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(AppTheme.neutral600)
                         }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
+                        .padding(.vertical, AppTheme.space3)
+                        .padding(.horizontal, AppTheme.space3)
+                        .contentShape(Rectangle())
                     }
-                    .padding()
-                    .background(Color(.systemBackground).opacity(0.96))
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 }
 
 struct ReportDetailView: View {
     @ObservedObject var store: ReceiptStore
     let kind: ReportKind
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 18) {
-                detailHeader
+            VStack(alignment: .leading, spacing: AppTheme.space4) {
+                BackLink(title: "Reports") { dismiss() }
+                VStack(alignment: .leading, spacing: AppTheme.space1) {
+                    Text(kind.rawValue)
+                        .font(AppFont.title)
+                        .foregroundStyle(AppTheme.text)
+                    Text(kind.subtitle)
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
+                }
+
                 switch kind {
                 case .overview:
                     overviewSection
@@ -165,119 +122,107 @@ struct ReportDetailView: View {
                     summaryList(store.monthlySpendSummaries, emptyText: "No monthly data yet.")
                 }
             }
-            .padding()
+            .padding(AppTheme.space4)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle(kind.rawValue)
-        .navigationBarTitleDisplayMode(.inline)
-    }
-
-    private var detailHeader: some View {
-        HStack(spacing: 14) {
-            Image(systemName: kind.icon)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(kind.tint)
-                .frame(width: 54, height: 54)
-                .background(kind.tint.opacity(0.14))
-                .clipShape(Circle())
-            VStack(alignment: .leading, spacing: 5) {
-                Text(kind.rawValue)
-                    .font(.title2.weight(.bold))
-                Text(kind.subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .background(AppTheme.bg.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var overviewSection: some View {
-        VStack(spacing: 14) {
-            cleanStatRow(title: "Total Spend", subtitle: "All saved receipts", amount: store.totalSpend, count: store.receiptCount, tint: .purple)
-            cleanStatRow(title: "This Month", subtitle: "Current calendar month", amount: store.monthlySpend, count: store.receiptCount, tint: .blue)
+        VStack(alignment: .leading, spacing: AppTheme.space4) {
+            RuledStack {
+                RuledRow { cleanStatRow(title: "Total Spend", value: store.totalSpend) }
+                RuledRow { cleanStatRow(title: "This Month", value: store.monthlySpend) }
+            }
+            SectionLabel(text: "Weekly Trend")
             weeklyTrend
         }
     }
 
     private func summaryList(_ summaries: [ReceiptStore.SpendSummary], emptyText: String) -> some View {
-        VStack(spacing: 12) {
+        Group {
             if summaries.isEmpty {
                 Text(emptyText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding()
+                    .font(AppFont.subhead)
+                    .foregroundStyle(AppTheme.textMuted)
+                    .padding(AppTheme.space4)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(.systemBackground).opacity(0.96))
-                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .background(AppTheme.surface)
+                    .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
             } else {
-                ForEach(summaries) { item in
-                    cleanStatRow(title: item.title, subtitle: item.subtitle, amount: item.amount, count: item.receiptCount, tint: kind.tint)
+                RuledStack {
+                    ForEach(summaries) { item in
+                        RuledRow {
+                            HStack(spacing: AppTheme.space3) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title)
+                                        .font(AppFont.headline)
+                                        .foregroundStyle(AppTheme.text)
+                                        .lineLimit(1)
+                                    Text("\(item.subtitle) · \(item.receiptCount) receipt\(item.receiptCount == 1 ? "" : "s")")
+                                        .font(AppFont.subhead)
+                                        .foregroundStyle(AppTheme.textMuted)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: AppTheme.space2)
+                                Text(item.amount.formatted(.currency(code: Invoice.defaultCurrency)))
+                                    .font(AppFont.title2)
+                                    .foregroundStyle(AppTheme.text)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            .padding(.vertical, AppTheme.space3)
+                            .padding(.horizontal, AppTheme.space3)
+                        }
+                    }
                 }
             }
         }
     }
 
-    private func cleanStatRow(title: String, subtitle: String, amount: Decimal, count: Int, tint: Color) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                Text("\(subtitle) • \(count) receipt\(count == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            Spacer(minLength: 16)
-            Text(amount.formatted(.currency(code: Invoice.defaultCurrency)))
-                .font(.title3.weight(.bold))
-                .foregroundStyle(tint)
+    private func cleanStatRow(title: String, value: Decimal) -> some View {
+        HStack {
+            Text(title)
+                .font(AppFont.headline)
+                .foregroundStyle(AppTheme.text)
+            Spacer()
+            Text(value.formatted(.currency(code: Invoice.defaultCurrency)))
+                .font(AppFont.title2)
+                .foregroundStyle(AppTheme.text)
                 .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .monospacedDigit()
+                .minimumScaleFactor(0.7)
         }
-        .padding()
-        .background(Color(.systemBackground).opacity(0.96))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .padding(.vertical, AppTheme.space3)
+        .padding(.horizontal, AppTheme.space3)
     }
 
     private var weeklyTrend: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Weekly Trend")
-                .font(.headline)
+        VStack(spacing: AppTheme.space2 + 2) {
             ForEach(Array(store.weeklySpendByDay.enumerated()), id: \.offset) { _, day in
-                HStack {
+                HStack(spacing: AppTheme.space2 + 2) {
                     Text(day.label)
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 42, alignment: .leading)
+                        .font(AppFont.headline)
+                        .frame(width: 32, alignment: .leading)
                     GeometryReader { geometry in
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(LinearGradient(colors: [Color.blue.opacity(0.9), Color.purple.opacity(0.75)], startPoint: .leading, endPoint: .trailing))
+                        Rectangle()
+                            .fill(AppTheme.accent)
                             .frame(width: trendWidth(for: day.amount, totalWidth: geometry.size.width))
                     }
-                    .frame(height: 12)
+                    .frame(height: 10)
+                    .background(AppTheme.surface)
                     Text(day.amount.formatted(.currency(code: Invoice.defaultCurrency)))
-                        .font(.caption.weight(.bold))
+                        .font(AppFont.caption)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-                        .monospacedDigit()
-                        .frame(width: 86, alignment: .trailing)
+                        .frame(width: 64, alignment: .trailing)
                 }
             }
         }
-        .padding()
-        .background(Color(.systemBackground).opacity(0.96))
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
     }
 
     private func trendWidth(for amount: Decimal, totalWidth: CGFloat) -> CGFloat {
         let maxAmount = store.weeklySpendByDay.map(\.amount).max() ?? 0
-        guard maxAmount > 0 else { return totalWidth * 0.08 }
-        return max(totalWidth * 0.08, CGFloat(truncating: (amount / maxAmount) as NSDecimalNumber) * totalWidth)
+        guard maxAmount > 0 else { return totalWidth * 0.04 }
+        return max(totalWidth * 0.04, CGFloat(truncating: (amount / maxAmount) as NSDecimalNumber) * totalWidth)
     }
 }

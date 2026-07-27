@@ -8,6 +8,10 @@ struct ExpenseManagerApp: App {
         edgeFunctionBaseUrl: "https://lxxetltpuuwjtxmeemhx.supabase.co"
     )
 
+    init() {
+        AppFonts.registerIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView(supabaseService: supabaseService)

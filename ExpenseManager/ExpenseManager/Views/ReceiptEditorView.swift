@@ -11,16 +11,19 @@ struct ReceiptEditorView: View {
     @State private var cardLast4: String
     @State private var cardBank: String
     @State private var rawText: String
+    @State private var showingDeleteConfirmation = false
 
     let invoice: Invoice
     let onSave: (Invoice) -> Void
     let onCancel: () -> Void
+    let onDelete: (Invoice) -> Void
 
-    init(store: ReceiptStore, invoice: Invoice, onSave: @escaping (Invoice) -> Void, onCancel: @escaping () -> Void) {
+    init(store: ReceiptStore, invoice: Invoice, onSave: @escaping (Invoice) -> Void, onCancel: @escaping () -> Void, onDelete: @escaping (Invoice) -> Void) {
         self.store = store
         self.invoice = invoice
         self.onSave = onSave
         self.onCancel = onCancel
+        self.onDelete = onDelete
         _merchant = State(initialValue: invoice.merchant ?? "")
         _date = State(initialValue: invoice.date ?? Date())
         _totalText = State(initialValue: invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? "")
@@ -32,162 +35,131 @@ struct ReceiptEditorView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            header
+            RuleLine()
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 18) {
-                    headerCard
-                    detailsCard
-                    rawTextCard
-                    saveButton
-                }
-                .padding()
-            }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
-            .navigationTitle("Edit Receipt")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onCancel()
-                        dismiss()
+                VStack(spacing: AppTheme.space4) {
+                    FlatField(label: "Merchant") {
+                        TextField("Merchant", text: $merchant)
                     }
+                    FlatField(label: "Date") {
+                        DatePicker("", selection: $date, displayedComponents: .date)
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    HStack(spacing: AppTheme.space3) {
+                        FlatField(label: "Amount") {
+                            TextField("0.00", text: $totalText)
+                                .keyboardType(.decimalPad)
+                        }
+                        FlatField(label: "Currency") {
+                            Picker("", selection: $currency) {
+                                ForEach(Invoice.commonCurrencies, id: \.self) { Text($0).tag($0) }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(width: 100)
+                    }
+                    FlatField(label: "Category") {
+                        Picker("", selection: $category) {
+                            ForEach(Invoice.expenseCategories, id: \.self) { Text($0).tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    HStack(spacing: AppTheme.space3) {
+                        menuField(title: "Card Bank", selection: $cardBank, options: store.availableCardBankOptions)
+                        FlatField(label: "Last 4") {
+                            TextField("0000", text: $cardLast4)
+                                .keyboardType(.numberPad)
+                        }
+                        .frame(width: 90)
+                    }
+                    FlatField(label: "Raw OCR Text") {
+                        TextEditor(text: $rawText)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(minHeight: 110)
+                            .scrollContentBackground(.hidden)
+                    }
+                    Button("Delete Receipt") {
+                        showingDeleteConfirmation = true
+                    }
+                    .buttonStyle(FlatSecondaryButtonStyle(tint: AppTheme.accent700))
                 }
+                .padding(AppTheme.space4)
             }
         }
+        .background(AppTheme.bg.ignoresSafeArea())
+        .alert("Delete receipt?", isPresented: $showingDeleteConfirmation, actions: {
+            Button("Delete", role: .destructive) {
+                onDelete(invoice)
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        }, message: {
+            Text("This action cannot be undone.")
+        })
     }
 
-    private var headerCard: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "square.and.pencil")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 54, height: 54)
-                .background(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Clean up receipt data")
-                    .font(.title2.weight(.bold))
-                Text("Adjust the extracted values before they update Supabase.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+    private var header: some View {
+        HStack {
+            Button("Cancel") {
+                onCancel()
+                dismiss()
             }
+            .font(AppFont.headline)
+            .foregroundStyle(AppTheme.accent700)
+
             Spacer()
-        }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-    }
 
-    private var detailsCard: some View {
-        VStack(spacing: 14) {
-            styledTextField("Merchant", text: $merchant, icon: "storefront")
-            DatePicker("Date", selection: $date, displayedComponents: .date)
-                .padding(14)
-                .background(Color(.systemBackground).opacity(0.94))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            HStack(spacing: 12) {
-                styledTextField("Total", text: $totalText, icon: "dollarsign.circle")
-                    .keyboardType(.decimalPad)
-                Picker("Currency", selection: $currency) {
-                    ForEach(Invoice.commonCurrencies, id: \.self) { currency in
-                        Text(currency).tag(currency)
-                    }
-                }
-                .pickerStyle(.menu)
-                .padding(14)
-                .frame(width: 130, alignment: .leading)
-                .background(Color(.systemBackground).opacity(0.94))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            Text("Edit Receipt")
+                .font(AppFont.title2)
+                .foregroundStyle(AppTheme.text)
+
+            Spacer()
+
+            Button("Save") {
+                save()
             }
-
-            Picker("Category", selection: $category) {
-                ForEach(Invoice.expenseCategories, id: \.self) { category in
-                    Text(category).tag(category)
-                }
-            }
-            .pickerStyle(.menu)
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.systemBackground).opacity(0.94))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            HStack(spacing: 12) {
-                menuPicker(title: "Card last 4", selection: $cardLast4, options: store.availableCardLast4Options, icon: "creditcard")
-                menuPicker(title: "Card bank", selection: $cardBank, options: store.availableCardBankOptions, icon: "building.columns")
-            }
+            .font(AppFont.headline)
+            .foregroundStyle(AppTheme.accent)
+            .disabled(merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Decimal(string: totalText.replacingOccurrences(of: ",", with: "")) == nil)
         }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .padding(.horizontal, AppTheme.space4)
+        .padding(.top, AppTheme.space6 + AppTheme.space2)
+        .padding(.bottom, AppTheme.space3)
     }
 
-    private var rawTextCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Raw OCR text", systemImage: "doc.plaintext")
-                .font(.headline)
-            TextEditor(text: $rawText)
-                .frame(minHeight: 180)
-                .padding(10)
-                .background(Color(.systemBackground).opacity(0.94))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+    private func save() {
+        var updated = invoice
+        updated.merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.date = date
+        updated.currency = currency.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.cardLast4 = PaymentMappingService.normalizedLast4(from: cardLast4)
+        updated.cardBank = cardBank.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        updated.rawText = rawText
+        updated.total = Decimal(string: totalText.replacingOccurrences(of: ",", with: "")) ?? updated.total
+        onSave(updated)
+        dismiss()
     }
 
-    private var saveButton: some View {
-        Button {
-            var updated = invoice
-            updated.merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
-            updated.date = date
-            updated.currency = currency.trimmingCharacters(in: .whitespacesAndNewlines)
-            updated.category = category.trimmingCharacters(in: .whitespacesAndNewlines)
-            updated.cardLast4 = PaymentMappingService.normalizedLast4(from: cardLast4)
-            updated.cardBank = cardBank.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-            updated.rawText = rawText
-            updated.total = Decimal(string: totalText.replacingOccurrences(of: ",", with: "")) ?? updated.total
-            onSave(updated)
-            dismiss()
-        } label: {
-            Label("Save Changes", systemImage: "checkmark.circle.fill")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(.blue)
-        .disabled(merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Decimal(string: totalText.replacingOccurrences(of: ",", with: "")) == nil)
-    }
-
-    private func styledTextField(_ title: String, text: Binding<String>, icon: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(.blue)
-            TextField(title, text: text)
-        }
-        .padding(14)
-        .background(Color(.systemBackground).opacity(0.94))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-
-    private func menuPicker(title: String, selection: Binding<String>, options: [String], icon: String) -> some View {
+    private func menuField(title: String, selection: Binding<String>, options: [String]) -> some View {
         let allOptions = Array(Set(options + (selection.wrappedValue.nilIfEmpty.map { [$0] } ?? []))).sorted()
-
-        return HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(.blue)
-            Picker(title, selection: selection) {
+        return FlatField(label: title) {
+            Picker("", selection: selection) {
                 Text("Not selected").tag("")
                 ForEach(allOptions, id: \.self) { option in
                     Text(option).tag(option)
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
-        .background(Color(.systemBackground).opacity(0.94))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }

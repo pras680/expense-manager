@@ -16,163 +16,118 @@ struct PendingReceiptReviewView: View {
     @State private var rawText: String = ""
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            header
+            RuleLine()
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 18) {
-                    header
+                VStack(alignment: .leading, spacing: AppTheme.space4) {
+                    Text("Verify the extracted values before saving.")
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
+
                     extractedSummary
-                    fieldsCard
-                    rawTextCard
+
+                    FlatField(label: "Merchant") {
+                        TextField("Merchant", text: $merchant)
+                    }
+                    FlatField(label: "Date") {
+                        DatePicker("", selection: $date, displayedComponents: .date)
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    HStack(spacing: AppTheme.space3) {
+                        FlatField(label: "Amount") {
+                            TextField("0.00", text: $total)
+                                .keyboardType(.decimalPad)
+                        }
+                        FlatField(label: "Currency") {
+                            Picker("", selection: $currency) {
+                                ForEach(Invoice.commonCurrencies, id: \.self) { Text($0).tag($0) }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(width: 100)
+                    }
+                    FlatField(label: "Category") {
+                        Picker("", selection: $category) {
+                            ForEach(Invoice.expenseCategories, id: \.self) { Text($0).tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    HStack(spacing: AppTheme.space3) {
+                        menuField(title: "Card Bank", selection: $cardBank, options: store.availableCardBankOptions)
+                        FlatField(label: "Last 4") {
+                            TextField("0000", text: $cardLast4)
+                                .keyboardType(.numberPad)
+                        }
+                        .frame(width: 90)
+                    }
+                    FlatField(label: "Raw OCR Text") {
+                        TextEditor(text: $rawText)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(minHeight: 120)
+                            .scrollContentBackground(.hidden)
+                    }
+
                     actionButtons
                 }
-                .padding()
+                .padding(AppTheme.space4)
             }
-            .background(Color(.systemGroupedBackground).ignoresSafeArea())
-            .navigationTitle("Review Receipt")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onDiscard()
-                    }
-                }
-            }
-            .task {
-                guard let pending = pending else { return }
-                merchant = pending.invoice.merchant ?? ""
-                date = pending.invoice.date ?? Date()
-                total = pending.invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
-                currency = pending.invoice.currency ?? Invoice.defaultCurrency
-                category = pending.invoice.category ?? "Miscellaneous"
-                cardLast4 = pending.invoice.cardLast4 ?? ""
-                cardBank = pending.invoice.cardBank ?? ""
-                rawText = pending.invoice.rawText
-            }
+        }
+        .background(AppTheme.bg.ignoresSafeArea())
+        .task {
+            guard let pending = pending else { return }
+            merchant = pending.invoice.merchant ?? ""
+            date = pending.invoice.date ?? Date()
+            total = pending.invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
+            currency = pending.invoice.currency ?? Invoice.defaultCurrency
+            category = pending.invoice.category ?? "Miscellaneous"
+            cardLast4 = pending.invoice.cardLast4 ?? ""
+            cardBank = pending.invoice.cardBank ?? ""
+            rawText = pending.invoice.rawText
         }
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Verify extracted values", systemImage: "checkmark.seal.fill")
-                .font(.largeTitle.weight(.black))
-                .foregroundStyle(.white)
-            Text("Confirm the fields below. Approve saves the receipt to Supabase and uploads the receipt image when available.")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white.opacity(0.82))
+        HStack {
+            Button("Discard") { onDiscard() }
+                .font(AppFont.headline)
+                .foregroundStyle(AppTheme.accent700)
+            Spacer()
+            Text("Review Receipt")
+                .font(AppFont.title2)
+                .foregroundStyle(AppTheme.text)
+            Spacer()
+            Color.clear.frame(width: 56, height: 1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(22)
-        .background(LinearGradient(colors: [.indigo, .blue, .cyan], startPoint: .topLeading, endPoint: .bottomTrailing))
-        .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-        .shadow(color: .blue.opacity(0.22), radius: 18, y: 12)
+        .padding(.horizontal, AppTheme.space4)
+        .padding(.top, AppTheme.space6 + AppTheme.space2)
+        .padding(.bottom, AppTheme.space3)
     }
 
     private var extractedSummary: some View {
-        HStack(spacing: 12) {
-            summaryPill(title: "Merchant", value: merchant.isEmpty ? "Missing" : merchant, tint: .blue)
-            summaryPill(title: "Total", value: total.isEmpty ? "Missing" : total, tint: .green)
-            summaryPill(title: "Card", value: cardSummary, tint: .orange)
+        HStack(spacing: 1) {
+            StatCell(title: "Merchant", value: merchant.isEmpty ? "Missing" : merchant, valueSize: 14)
+            StatCell(title: "Total", value: total.isEmpty ? "Missing" : total, valueSize: 14)
+            StatCell(title: "Card", value: cardSummary, valueSize: 14)
         }
-    }
-
-    private func summaryPill(title: String, value: String, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.headline.weight(.bold))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .foregroundStyle(tint)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.systemBackground).opacity(0.94))
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-
-    private var fieldsCard: some View {
-        VStack(spacing: 14) {
-            styledTextField("Merchant", text: $merchant, icon: "storefront")
-
-            DatePicker("Date", selection: $date, displayedComponents: .date)
-                .padding(14)
-                .background(Color(.systemBackground).opacity(0.94))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            HStack(spacing: 12) {
-                styledTextField("Total", text: $total, icon: "dollarsign.circle")
-                    .keyboardType(.decimalPad)
-                Picker("Currency", selection: $currency) {
-                    ForEach(Invoice.commonCurrencies, id: \.self) { currency in
-                        Text(currency).tag(currency)
-                    }
-                }
-                .pickerStyle(.menu)
-                .padding(14)
-                .frame(width: 128, alignment: .leading)
-                .background(Color(.systemBackground).opacity(0.94))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }
-
-            Picker("Category", selection: $category) {
-                ForEach(Invoice.expenseCategories, id: \.self) { category in
-                    Text(category).tag(category)
-                }
-            }
-            .pickerStyle(.menu)
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.systemBackground).opacity(0.94))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-
-            HStack(spacing: 12) {
-                menuPicker(title: "Card last 4", selection: $cardLast4, options: store.availableCardLast4Options, icon: "creditcard")
-                menuPicker(title: "Card bank", selection: $cardBank, options: store.availableCardBankOptions, icon: "building.columns")
-            }
-        }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-    }
-
-    private var rawTextCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Raw OCR text", systemImage: "doc.text.magnifyingglass")
-                .font(.headline)
-            TextEditor(text: $rawText)
-                .font(.callout.monospaced())
-                .frame(minHeight: 190)
-                .padding(10)
-                .background(Color(.systemBackground).opacity(0.94))
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .background(AppTheme.divider)
     }
 
     private var actionButtons: some View {
-        VStack(spacing: 12) {
-            Button(action: approve) {
-                Label("Approve and Save", systemImage: "checkmark.circle.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.green)
-            .disabled(merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Decimal(string: total.replacingOccurrences(of: ",", with: "")) == nil)
+        VStack(spacing: AppTheme.space3) {
+            Button("Approve & Save", action: approve)
+                .buttonStyle(FlatPrimaryButtonStyle())
+                .disabled(merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Decimal(string: total.replacingOccurrences(of: ",", with: "")) == nil)
 
-            Button(role: .destructive, action: onDiscard) {
-                Label("Discard Receipt", systemImage: "trash")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-            }
-            .buttonStyle(.bordered)
+            Button("Reject", action: onDiscard)
+                .buttonStyle(FlatSecondaryButtonStyle())
         }
+        .padding(.top, AppTheme.space2)
     }
 
     private func approve() {
@@ -201,35 +156,19 @@ struct PendingReceiptReviewView: View {
         return "Missing"
     }
 
-    private func styledTextField(_ title: String, text: Binding<String>, icon: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(.blue)
-            TextField(title, text: text)
-        }
-        .padding(14)
-        .background(Color(.systemBackground).opacity(0.94))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-
-    private func menuPicker(title: String, selection: Binding<String>, options: [String], icon: String) -> some View {
+    private func menuField(title: String, selection: Binding<String>, options: [String]) -> some View {
         let allOptions = Array(Set(options + (selection.wrappedValue.nilIfEmpty.map { [$0] } ?? []))).sorted()
-
-        return HStack(spacing: 10) {
-            Image(systemName: icon)
-                .foregroundStyle(.blue)
-            Picker(title, selection: selection) {
+        return FlatField(label: title) {
+            Picker("", selection: selection) {
                 Text("Not selected").tag("")
                 ForEach(allOptions, id: \.self) { option in
                     Text(option).tag(option)
                 }
             }
             .pickerStyle(.menu)
+            .labelsHidden()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
-        .background(Color(.systemBackground).opacity(0.94))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 }
 
