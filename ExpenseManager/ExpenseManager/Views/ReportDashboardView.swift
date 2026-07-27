@@ -573,7 +573,7 @@ private struct ReportMonthlyBreakdownView: View {
                             .font(.headline)
                         ForEach(monthlyGroups) { group in
                             NavigationLink {
-                                ReportReceiptDrillDownView(
+                                ReportCategoryBreakdownView(
                                     store: store,
                                     title: group.title,
                                     subtitle: "\(group.receipts.count) receipt\(group.receipts.count == 1 ? "" : "s") • \(group.amount.formatted(.currency(code: store.defaultCurrencyCode)))",
@@ -687,6 +687,131 @@ private struct MonthlyReceiptGroup: Identifiable {
             if right.id == "unknown" { return true }
             return left.id > right.id
         }
+    }
+}
+
+private struct ReportCategoryBreakdownView: View {
+    @ObservedObject var store: ReceiptStore
+    let title: String
+    let subtitle: String
+    let receipts: [Invoice]
+    let tint: Color
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                if receipts.isEmpty {
+                    emptyState
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Category Breakdown")
+                            .font(.headline)
+                        ForEach(categoryGroups) { group in
+                            NavigationLink {
+                                ReportReceiptDrillDownView(
+                                    store: store,
+                                    title: "\(title) • \(group.title)",
+                                    subtitle: "\(group.receipts.count) receipt\(group.receipts.count == 1 ? "" : "s") • \(group.amount.formatted(.currency(code: store.defaultCurrencyCode)))",
+                                    receipts: group.receipts,
+                                    tint: tint
+                                )
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(group.title)
+                                            .font(.headline)
+                                        Text("\(group.receipts.count) receipt\(group.receipts.count == 1 ? "" : "s")")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 16)
+                                    Text(group.amount.formatted(.currency(code: store.defaultCurrencyCode)))
+                                        .font(.title3.weight(.bold))
+                                        .foregroundStyle(tint)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.65)
+                                        .monospacedDigit()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding()
+                                .background(Color(.systemBackground).opacity(0.96))
+                                .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding()
+                    .background(.regularMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                }
+            }
+            .padding()
+        }
+        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.title2.weight(.bold))
+            Text(subtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(tint.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private var emptyState: some View {
+        Text("No receipts found for this month.")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.systemBackground).opacity(0.96))
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private var categoryGroups: [CategoryReceiptGroup] {
+        CategoryReceiptGroup.make(from: receipts, defaultCurrencyCode: store.defaultCurrencyCode)
+    }
+}
+
+private struct CategoryReceiptGroup: Identifiable {
+    let id: String
+    let title: String
+    let amount: Decimal
+    let receipts: [Invoice]
+
+    static func make(from receipts: [Invoice], defaultCurrencyCode: String) -> [CategoryReceiptGroup] {
+        var grouped: [String: (title: String, amount: Decimal, receipts: [Invoice])] = [:]
+        for invoice in receipts {
+            let category = invoice.category?.nilIfEmpty ?? "Miscellaneous"
+            let key = category.lowercased()
+            let existing = grouped[key] ?? (title: category, amount: 0, receipts: [])
+            grouped[key] = (
+                title: category,
+                amount: existing.amount + (invoice.reportingTotal(defaultCurrencyCode: defaultCurrencyCode) ?? 0),
+                receipts: existing.receipts + [invoice]
+            )
+        }
+
+        return grouped.map { key, value in
+            CategoryReceiptGroup(
+                id: key,
+                title: value.title,
+                amount: value.amount,
+                receipts: value.receipts.sorted { ($0.date ?? Date.distantPast) > ($1.date ?? Date.distantPast) }
+            )
+        }
+        .sorted { $0.amount > $1.amount }
     }
 }
 

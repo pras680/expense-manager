@@ -342,7 +342,7 @@ struct InvoiceParser {
             "sent to",
             "paid to",
             "merchant"
-        ].contains { normalized.contains($0) }
+        ].contains { normalized.contains($0) } || isReversalTransaction(text: text)
         let hasNonExpenseCue = [
             "otp",
             "one-time password",
@@ -352,6 +352,35 @@ struct InvoiceParser {
             "available balance only"
         ].contains { normalized.contains($0) }
         return hasMoney && hasTransactionCue && !hasNonExpenseCue
+    }
+
+    /// Detects reversal/refund/chargeback alerts that cancel out a previous charge.
+    static func isReversalTransaction(text: String) -> Bool {
+        let normalized = text.lowercased()
+        let reversalCues = [
+            "reversal",
+            "reversed",
+            "has been reversed",
+            "transaction reversed",
+            "charge reversed",
+            "payment reversed",
+            "refund",
+            "refunded",
+            "chargeback",
+            "charge back",
+            "credited back",
+            "credit back",
+            "money back",
+            "amount credited",
+            "transaction cancelled",
+            "transaction canceled",
+            "cancelled transaction",
+            "canceled transaction",
+            "transaction voided",
+            "voided",
+            "declined and reversed"
+        ]
+        return reversalCues.contains { normalized.contains($0) }
     }
 
     static func extractSMSMerchant(from text: String) -> String? {
