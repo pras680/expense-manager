@@ -44,7 +44,6 @@ struct MainTabView: View {
             await store.refreshSupabaseSession()
             await store.loadReceipts()
             store.configureGmailBackgroundSchedule()
-            store.runGmailScanOnAppLoad()
         }
         .fullScreenCover(isPresented: $store.showScanner) {
             DocumentScanner { result in
@@ -131,7 +130,7 @@ private struct ToolsView: View {
                         get: { store.gmailDailyAgentEnabled },
                         set: { store.setGmailDailyAgentEnabled($0) }
                     )) {
-                        Label("Daily Gmail Agent", systemImage: "calendar.badge.clock")
+                        Label("Daily Gmail + Telegram Agent", systemImage: "calendar.badge.clock")
                             .font(.headline)
                         Text(store.gmailScheduleSubtitle)
                             .font(.caption)
