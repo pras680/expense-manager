@@ -28,8 +28,6 @@ struct ReceiptsDashboardView: View {
     @State private var activeInvoice: Invoice?
     @State private var showingDeleteConfirmation = false
     @State private var showingSMSImport = false
-    @State private var showingGmailLookbackPrompt = false
-    @State private var gmailLookbackDays = "30"
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -73,17 +71,6 @@ struct ReceiptsDashboardView: View {
                 Button("Cancel", role: .cancel) {}
             }, message: {
                 Text("This action cannot be undone.")
-            })
-            .alert("Scan Gmail", isPresented: $showingGmailLookbackPrompt, actions: {
-                TextField("Days", text: $gmailLookbackDays)
-                    .keyboardType(.numberPad)
-                Button("OK") {
-                    let days = Int(gmailLookbackDays.trimmingCharacters(in: .whitespacesAndNewlines)) ?? GmailOAuthConfiguration.maximumLookbackDays
-                    store.startManualGmailScan(lookbackDays: days)
-                }
-                Button("Cancel", role: .cancel) {}
-            }, message: {
-                Text("Enter the number of days to scan. Maximum is \(GmailOAuthConfiguration.maximumLookbackDays) days.")
             })
             .alert(item: $store.gmailScanLog) { log in
                 Alert(
@@ -257,16 +244,15 @@ struct ReceiptsDashboardView: View {
         VStack(spacing: 12) {
             HStack(spacing: 10) {
                 sourceButton(
-                    title: store.gmailAgentIsRunning ? "Stop Gmail" : "Scan Gmail",
-                    detail: store.gmailAgentIsRunning ? "Scanning now" : "Choose days",
+                    title: store.gmailAgentIsRunning ? "Stop Agent" : "Scan Gmail",
+                    detail: store.gmailAgentIsRunning ? "Scanning now" : "Gmail only",
                     icon: store.gmailAgentIsRunning ? "stop.circle.fill" : "envelope.badge.shield.half.filled",
                     tint: store.gmailAgentIsRunning ? MellowPalette.clay : MellowPalette.dustyBlue
                 ) {
                     if store.gmailAgentIsRunning {
                         store.toggleGmailAgent()
                     } else {
-                        gmailLookbackDays = "30"
-                        showingGmailLookbackPrompt = true
+                        store.startManualGmailScanSinceLastCheck()
                     }
                 }
 
@@ -292,7 +278,7 @@ struct ReceiptsDashboardView: View {
                         Text(store.gmailAgentLiveStatusTitle)
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(store.gmailDailyAgentEnabled ? MellowPalette.sage : MellowPalette.text)
-                        Text("Last Gmail scan: \(store.gmailLastScanInfo)")
+                        Text("Last scan: \(store.gmailLastScanInfo)")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(MellowPalette.secondaryText)
                             .lineLimit(1)

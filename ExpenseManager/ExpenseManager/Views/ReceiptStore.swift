@@ -26,12 +26,17 @@ class ReceiptStore: ObservableObject {
     @Published var defaultCurrencyCode: String
     @Published var supabaseSession: SupabaseAuthSession?
     @Published var showSupabaseSignIn = false
-
+    @Published var telegramConfigured = false
+    @Published var telegramFetchLog: String? = nil
+    @Published var smsInboxFetchLog: String? = nil
+    @Published var smsInboxPendingCount: Int? = nil
+    @Published var smsInboxFailedCount: Int? = nil
     let supabaseService: SupabaseService
     private let paymentMappingService: PaymentMappingService
     private let currencyConversionService = CurrencyConversionService()
     private let ocr = OCRService()
     private let gmailScanner = GmailReceiptScanner()
+    private let telegramService = TelegramService()
     private let calendar = Calendar.current
     private var pendingReceiptQueue: [PendingReceipt] = []
     private var gmailScanTask: Task<Void, Never>?
@@ -123,6 +128,7 @@ class ReceiptStore: ObservableObject {
                 self?.statusMessage = message
             }
         }
+        self.telegramConfigured = telegramService.isConfigured()
     }
 
     var supabaseAuthTitle: String {
@@ -140,12 +146,12 @@ class ReceiptStore: ObservableObject {
     }
 
     var gmailAgentTitle: String {
-        gmailAgentIsRunning ? "Stop Gmail Agent" : "Scan Gmail"
+        gmailAgentIsRunning ? "Stop Agent" : "Scan Gmail + Telegram"
     }
 
     var gmailAgentSubtitle: String {
         if gmailAgentIsRunning {
-            return gmailScanSummary ?? "Scanning read-only Gmail messages now"
+            return gmailScanSummary ?? "Scanning Gmail and Telegram now"
         }
         if let gmailScanSummary {
             return gmailScanSummary
@@ -153,7 +159,7 @@ class ReceiptStore: ObservableObject {
         if let gmailLastScanDate {
             return "Last scan: \(DateFormatter.localizedString(from: gmailLastScanDate, dateStyle: .medium, timeStyle: .short))"
         }
-        return "Read-only search, capped at the last 30 days"
+        return "Reads Gmail receipts and Telegram SMS alerts"
     }
 
     var gmailScheduleSubtitle: String {
@@ -176,7 +182,7 @@ class ReceiptStore: ObservableObject {
 
     var gmailLastScanInfo: String {
         guard let gmailLastScanDate else {
-            return "No Gmail scan yet"
+            return "No scan yet"
         }
         return DateFormatter.localizedString(from: gmailLastScanDate, dateStyle: .medium, timeStyle: .short)
     }
@@ -453,8 +459,8 @@ class ReceiptStore: ObservableObject {
             gmailScanTask?.cancel()
             gmailScanTask = nil
             gmailAgentIsRunning = false
-            gmailScanSummary = "Gmail scan stopped."
-            statusMessage = "Gmail agent stopped."
+            gmailScanSummary = "Scan stopped."
+            statusMessage = "Agent stopped."
             return
         }
 
@@ -466,11 +472,17 @@ class ReceiptStore: ObservableObject {
         if cappedDays != lookbackDays {
             statusMessage = "Gmail scan is capped at the last \(GmailOAuthConfiguration.maximumLookbackDays) days."
         }
-        startGmailScan(allowInteractiveAuth: true, scheduled: false, lookbackDays: cappedDays, ignoreLastScanDate: true, presentLog: true)
+        startGmailScan(allowInteractiveAuth: true, scheduled: false, lookbackDays: cappedDays, ignoreLastScanDate: true, presentLog: true, scanTelegram: true)
+    }
+
+    /// Manual "Scan Gmail" tap: scans Gmail only (Telegram is handled separately via
+    /// Scan SMS) since the last check, allowing interactive sign-in when needed.
+    func startManualGmailScanSinceLastCheck() {
+        startGmailScan(allowInteractiveAuth: true, scheduled: false, lookbackDays: nil, ignoreLastScanDate: false, presentLog: true, scanTelegram: false)
     }
 
     func runGmailScanOnAppLoad() {
-        startGmailScan(allowInteractiveAuth: false, scheduled: false, lookbackDays: nil, ignoreLastScanDate: false, presentLog: true)
+        startGmailScan(allowInteractiveAuth: false, scheduled: false, lookbackDays: nil, ignoreLastScanDate: false, presentLog: true, scanTelegram: true)
     }
 
     func dismissGmailScanLog() {
@@ -483,12 +495,14 @@ class ReceiptStore: ObservableObject {
     func setGmailDailyAgentEnabled(_ enabled: Bool) {
         gmailDailyAgentEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: gmailDailyAgentEnabledKey)
-        gmailScanSummary = enabled ? "Daily Gmail scan enabled." : "Daily Gmail scan disabled."
+        gmailScanSummary = enabled ? "Daily Gmail + Telegram scan enabled." : "Daily Gmail + Telegram scan disabled."
         statusMessage = gmailScanSummary
 
         if enabled {
             GmailBackgroundScheduler.scheduleDailyScan()
-            startGmailScan(allowInteractiveAuth: true, scheduled: true, lookbackDays: nil, ignoreLastScanDate: false, presentLog: false)
+            // Only run an immediate scan if today's daily scan hasn't happened yet, so
+            // toggling the agent on doesn't repeatedly consume CPU/power for the same day.
+            runDailyGmailAgentIfNeeded()
         } else {
             GmailBackgroundScheduler.cancelDailyScan()
         }
@@ -508,7 +522,7 @@ class ReceiptStore: ObservableObject {
             return
         }
 
-        startGmailScan(allowInteractiveAuth: false, scheduled: true, lookbackDays: nil, ignoreLastScanDate: false, presentLog: false)
+        startGmailScan(allowInteractiveAuth: false, scheduled: true, lookbackDays: nil, ignoreLastScanDate: false, presentLog: false, scanTelegram: true)
     }
 
     func runAutonomousDailyGmailScanFromBackground() async -> Bool {
@@ -520,25 +534,25 @@ class ReceiptStore: ObservableObject {
             return true
         }
 
-        return await performGmailScan(allowInteractiveAuth: false, scheduled: true, lookbackDays: nil, ignoreLastScanDate: false, presentLog: false)
+        return await performGmailScan(allowInteractiveAuth: false, scheduled: true, lookbackDays: nil, ignoreLastScanDate: false, presentLog: false, scanTelegram: true)
     }
 
-    private func startGmailScan(allowInteractiveAuth: Bool, scheduled: Bool, lookbackDays: Int?, ignoreLastScanDate: Bool, presentLog: Bool) {
+    private func startGmailScan(allowInteractiveAuth: Bool, scheduled: Bool, lookbackDays: Int?, ignoreLastScanDate: Bool, presentLog: Bool, scanTelegram: Bool) {
         guard !gmailAgentIsRunning else { return }
 
         gmailScanTask = Task { [weak self] in
             guard let self else { return }
-            _ = await self.performGmailScan(allowInteractiveAuth: allowInteractiveAuth, scheduled: scheduled, lookbackDays: lookbackDays, ignoreLastScanDate: ignoreLastScanDate, presentLog: presentLog)
+            _ = await self.performGmailScan(allowInteractiveAuth: allowInteractiveAuth, scheduled: scheduled, lookbackDays: lookbackDays, ignoreLastScanDate: ignoreLastScanDate, presentLog: presentLog, scanTelegram: scanTelegram)
         }
     }
 
     @discardableResult
-    private func performGmailScan(allowInteractiveAuth: Bool, scheduled: Bool, lookbackDays: Int?, ignoreLastScanDate: Bool, presentLog: Bool) async -> Bool {
+    private func performGmailScan(allowInteractiveAuth: Bool, scheduled: Bool, lookbackDays: Int?, ignoreLastScanDate: Bool, presentLog: Bool, scanTelegram: Bool) async -> Bool {
         guard !gmailAgentIsRunning else { return true }
 
         gmailAgentIsRunning = true
         isProcessing = true
-        gmailScanSummary = scheduled ? "Daily Gmail scan is running..." : "Gmail scan is running..."
+        gmailScanSummary = scheduled ? "Daily scan is running..." : "Scan is running..."
         statusMessage = gmailScanSummary
 
         defer {
@@ -568,7 +582,10 @@ class ReceiptStore: ObservableObject {
             try Task.checkCancellation()
             var importedCount = 0
             var duplicateCount = 0
+            var reversalCount = 0
+            var reversalMatchedCount = 0
             var importedDuringScan: [Invoice] = []
+            var lastImportedInvoice: Invoice? = nil
             var logLines: [String] = [
                 "Search window: \(DateFormatter.localizedString(from: result.searchedFrom, dateStyle: .medium, timeStyle: .short)) to \(DateFormatter.localizedString(from: result.searchedThrough, dateStyle: .medium, timeStyle: .short))",
                 "Emails matched by Gmail search: \(result.scannedMessageCount)",
@@ -584,6 +601,22 @@ class ReceiptStore: ObservableObject {
                 var invoice = try await invoiceFromExtractedText(candidate.rawText)
                 if invoice.date == nil {
                     invoice.date = candidate.receivedDate
+                }
+
+                // Reversal/refund emails cancel out a matching original charge.
+                let reversal = await applyReversalIfPresent(for: invoice, source: "Gmail")
+                if reversal.isReversal {
+                    let reversalDetail = reversal.removedOriginal
+                        ? "Reversal matched and removed the original charge."
+                        : "Reversal found but no matching original charge."
+                    AppSecurity.debugLog("Gmail reversal handled: messageID=\(candidate.messageID), removedOriginal=\(reversal.removedOriginal).")
+                    logLines.append(reversalDetail)
+                    rememberReviewedReceipt(invoice, action: "reversal-processed")
+                    reversalCount += 1
+                    if reversal.removedOriginal {
+                        reversalMatchedCount += 1
+                    }
+                    continue
                 }
 
                 if hasLikelyDuplicate(for: invoice, comparedTo: importedDuringScan) {
@@ -602,6 +635,7 @@ class ReceiptStore: ObservableObject {
                 logLines.append(importDetail)
                 enqueuePendingReceipt(invoice: invoice, imageData: nil, presentImmediately: !presentLog)
                 importedDuringScan.append(invoice)
+                lastImportedInvoice = invoice
                 importedCount += 1
             }
 
@@ -616,9 +650,65 @@ class ReceiptStore: ObservableObject {
                 UserDefaults.standard.set(Date(), forKey: gmailLastDailyRunDateKey)
             }
 
+            // Agent runs also read Telegram (notification mirror) and the Supabase SMS inbox
+            // (source of truth, populated by the iOS Shortcuts automation) in the same run.
+            // A manual "Scan Gmail" tap keeps Gmail separate from these (scanTelegram=false).
+            var telegram = AgentTelegramResult()
+            var smsInbox = AgentSMSInboxResult()
+            if scanTelegram {
+                try Task.checkCancellation()
+                let smsInboxProgress = "Checking SMS inbox for new messages..."
+                gmailScanSummary = smsInboxProgress
+                statusMessage = smsInboxProgress
+                smsInbox = await scanSMSInboxForAgent(presentImmediately: !presentLog)
+                importedCount += smsInbox.imported
+                duplicateCount += smsInbox.skipped
+                if let smsInboxLast = smsInbox.lastImported {
+                    lastImportedInvoice = smsInboxLast
+                }
+                reversalCount += smsInbox.reversals
+                reversalMatchedCount += smsInbox.reversalsMatched
+                logLines.append(contentsOf: smsInbox.logLines)
+
+                try Task.checkCancellation()
+                let telegramProgress = "Checking Telegram for new messages..."
+                gmailScanSummary = telegramProgress
+                statusMessage = telegramProgress
+                telegram = await scanTelegramForAgent(presentImmediately: !presentLog)
+                importedCount += telegram.imported
+                duplicateCount += telegram.skipped
+                if let telegramLast = telegram.lastImported {
+                    lastImportedInvoice = telegramLast
+                }
+                reversalCount += telegram.reversals
+                reversalMatchedCount += telegram.reversalsMatched
+                logLines.append(contentsOf: telegram.logLines)
+            }
+
             let duplicateSummary = duplicateCount > 0 ? " Skipped \(duplicateCount) likely duplicate\(duplicateCount == 1 ? "" : "s")." : ""
+            let reversalSummary = reversalCount > 0
+                ? " Processed \(reversalCount) reversal\(reversalCount == 1 ? "" : "s")\(reversalMatchedCount > 0 ? ", removed \(reversalMatchedCount) original charge\(reversalMatchedCount == 1 ? "" : "s")" : "")."
+                : ""
             let markerSummary = result.latestIdentifiedEmailDate.map { " Last identified email: \(DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .short))." } ?? " Last identified email marker unchanged."
-            let summary = "Gmail scan found \(importedCount) new receipt\(importedCount == 1 ? "" : "s") from \(result.scannedMessageCount) email\(result.scannedMessageCount == 1 ? "" : "s").\(duplicateSummary)\(markerSummary)"
+            let smsInboxSummary: String
+            if smsInbox.attempted {
+                smsInboxSummary = smsInbox.errorMessage.map { " SMS inbox: \($0)" }
+                    ?? " SMS inbox added \(smsInbox.imported) new receipt\(smsInbox.imported == 1 ? "" : "s") from \(smsInbox.messagesRead) message\(smsInbox.messagesRead == 1 ? "" : "s")."
+            } else {
+                smsInboxSummary = ""
+            }
+            let telegramSummary: String
+            if telegram.attempted {
+                telegramSummary = telegram.errorMessage.map { " Telegram: \($0)" }
+                    ?? " Telegram added \(telegram.imported) new receipt\(telegram.imported == 1 ? "" : "s") from \(telegram.messagesRead) message\(telegram.messagesRead == 1 ? "" : "s")."
+            } else {
+                telegramSummary = ""
+            }
+            let sourceLabel = scanTelegram ? "Gmail, SMS inbox, and Telegram" : "Gmail"
+            let lastReceiptSummary = importedCount > 0
+                ? (lastReceiptDetail(for: lastImportedInvoice).map { " Last receipt: \($0)." } ?? "")
+                : ""
+            let summary = "Scan found \(importedCount) new receipt\(importedCount == 1 ? "" : "s") from \(sourceLabel) (\(result.scannedMessageCount) email\(result.scannedMessageCount == 1 ? "" : "s") checked).\(duplicateSummary)\(reversalSummary)\(smsInboxSummary)\(telegramSummary)\(lastReceiptSummary)\(markerSummary)"
             if result.receiptCandidates.isEmpty {
                 logLines.append("No eligible receipts found in this Gmail scan.")
             }
@@ -627,23 +717,47 @@ class ReceiptStore: ObservableObject {
             statusMessage = importedCount > 0 ? "\(summary) Review extracted receipts before saving." : summary
             if presentLog {
                 let reviewMessage = importedCount > 0 ? "\nReview the new receipt\(importedCount == 1 ? "" : "s") before saving." : ""
-                gmailScanLog = GmailScanLog(title: "Gmail Scan Summary", message: "\(summary)\(reviewMessage)")
+                gmailScanLog = GmailScanLog(title: "Scan Summary", message: "\(summary)\(reviewMessage)")
             }
             return true
         } catch is CancellationError {
-            gmailScanSummary = "Gmail scan stopped."
-            statusMessage = "Gmail agent stopped."
+            gmailScanSummary = "Scan stopped."
+            statusMessage = "Agent stopped."
             if presentLog {
-                gmailScanLog = GmailScanLog(title: "Gmail Scan Stopped", message: "The Gmail scan was stopped before completion.")
+                gmailScanLog = GmailScanLog(title: "Scan Stopped", message: "The scan was stopped before completion.")
             }
             return false
         } catch {
-            let safeMessage = AppSecurity.safeUserMessage(for: error, fallback: "Gmail scan could not complete. Check Gmail sign-in and backend access.")
-            gmailScanSummary = safeMessage
-            statusMessage = safeMessage
+            // Gmail failed (e.g. not signed in). Still try the SMS inbox and Telegram so agent
+            // runs stay useful. A Gmail-only manual scan (scanTelegram=false) reports the Gmail
+            // error directly.
+            let gmailSafeMessage = AppSecurity.safeUserMessage(for: error, fallback: "Gmail scan could not complete. Check Gmail sign-in and backend access.")
             AppSecurity.debugLog("Gmail scan failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+
+            if scanTelegram {
+                let smsInbox = await scanSMSInboxForAgent(presentImmediately: !presentLog)
+                let telegram = await scanTelegramForAgent(presentImmediately: !presentLog)
+                if (smsInbox.attempted && smsInbox.errorMessage == nil) || (telegram.attempted && telegram.errorMessage == nil) {
+                    let importedCount = smsInbox.imported + telegram.imported
+                    let lastImported = telegram.lastImported ?? smsInbox.lastImported
+                    let lastReceiptSummary = importedCount > 0
+                        ? (lastReceiptDetail(for: lastImported).map { " Last receipt: \($0)." } ?? "")
+                        : ""
+                    let messagesRead = smsInbox.messagesRead + telegram.messagesRead
+                    let fallbackSummary = "Gmail unavailable (\(gmailSafeMessage)) SMS inbox and Telegram added \(importedCount) new receipt\(importedCount == 1 ? "" : "s") from \(messagesRead) message\(messagesRead == 1 ? "" : "s").\(lastReceiptSummary)"
+                    gmailScanSummary = fallbackSummary
+                    statusMessage = importedCount > 0 ? "\(fallbackSummary) Review extracted receipts before saving." : fallbackSummary
+                    if presentLog {
+                        gmailScanLog = GmailScanLog(title: "Scan Summary", message: fallbackSummary)
+                    }
+                    return importedCount > 0
+                }
+            }
+
+            gmailScanSummary = gmailSafeMessage
+            statusMessage = gmailSafeMessage
             if presentLog {
-                gmailScanLog = GmailScanLog(title: "Gmail Scan Error", message: safeMessage)
+                gmailScanLog = GmailScanLog(title: "Scan Error", message: gmailSafeMessage)
             }
             return false
         }
@@ -1071,7 +1185,13 @@ class ReceiptStore: ObservableObject {
 
         let candidateKind = duplicateKind(for: candidate)
         let existingKind = duplicateKind(for: existing)
-        guard candidateKind == existingKind else { return false }
+
+        // Same expense delivered through different channels (email vs SMS/Telegram) can
+        // be classified differently because the wording differs. When the kinds don't
+        // match, fall back to a cross-source comparison based on amount + identity + date.
+        guard candidateKind == existingKind else {
+            return crossSourceDuplicateMatches(candidate, existing)
+        }
 
         switch candidateKind {
         case .creditCardBillPayment:
@@ -1079,11 +1199,26 @@ class ReceiptStore: ObservableObject {
             return datesAreWithinTolerance(candidate.date, existing.date, days: 35, allowMissingDates: true)
         case .payNowTransfer:
             guard merchantKeysMatch(candidate.merchant, existing.merchant) else { return false }
-            return datesAreWithinTolerance(candidate.date, existing.date, days: 1, allowMissingDates: false)
+            return datesAreWithinTolerance(candidate.date, existing.date, days: 0, allowMissingDates: true)
         case .genericReceipt:
-            guard merchantKeysMatch(candidate.merchant, existing.merchant), categoryKeysMatch(candidate.category, existing.category) else { return false }
-            return datesAreWithinTolerance(candidate.date, existing.date, days: 0, allowMissingDates: false)
+            guard merchantKeysMatch(candidate.merchant, existing.merchant), categoryKeysMatch(candidate.category, existing.category) else {
+                // Merchant/category wording often differs between an emailed receipt and
+                // an SMS alert for the same purchase. Try the cross-source rule before giving up.
+                return crossSourceDuplicateMatches(candidate, existing)
+            }
+            return datesAreWithinTolerance(candidate.date, existing.date, days: 0, allowMissingDates: true)
         }
+    }
+
+    /// Detects the same expense arriving from different sources (e.g. a Gmail receipt and a
+    /// Telegram/SMS bank alert) where the text, classification, and even the extracted date
+    /// may differ. Requires a matching amount (already confirmed by the caller) plus a
+    /// matching merchant or card identity and an exact-day date match.
+    private func crossSourceDuplicateMatches(_ candidate: Invoice, _ existing: Invoice) -> Bool {
+        let identityMatches = merchantKeysMatch(candidate.merchant, existing.merchant)
+            || creditCardIdentityMatches(candidate, existing)
+        guard identityMatches else { return false }
+        return datesAreWithinTolerance(candidate.date, existing.date, days: 0, allowMissingDates: true)
     }
 
     private func duplicateKind(for invoice: Invoice) -> ReceiptDuplicateKind {
@@ -1304,20 +1439,278 @@ class ReceiptStore: ObservableObject {
         AppSecurity.debugLog("SMS scan started from \(source).")
 
         let messages = Self.smsMessageChunks(from: AppSecurity.clippedSensitiveText(trimmed, limit: AppSecurity.maxSharedTextCharacters))
-        var importedCount = 0
-        var skippedCount = 0
+        let result = await importSMSMessages(messages, source: source)
+
+        applySMSImportStatus(result, source: source, noMessagesFallback: "No SMS expenses found.")
+        isProcessing = false
+    }
+
+    // MARK: - Telegram SMS ingestion
+
+    /// True when a Telegram bot token has been saved to the Keychain.
+    func refreshTelegramConfiguration() {
+        telegramConfigured = telegramService.isConfigured()
+    }
+
+    func saveTelegramBotToken(_ token: String) async {
+        await telegramService.saveToken(token)
+        telegramConfigured = telegramService.isConfigured()
+        statusMessage = telegramConfigured
+            ? "Telegram bot connected. Tap Fetch from Telegram to import."
+            : "Telegram bot token cleared."
+    }
+
+    func clearTelegramBotToken() async {
+        await telegramService.clearToken()
+        telegramConfigured = telegramService.isConfigured()
+        statusMessage = "Telegram bot token removed."
+    }
+
+    /// Pulls new messages from the Telegram bot and routes each one through the
+    /// same expense pipeline as pasted SMS (filtering, duplicate check, error handling).
+    func importSMSFromTelegram() async {
+        guard !isProcessing else {
+            telegramFetchLog = "Telegram fetch ignored because another scan is already running."
+            AppSecurity.debugLog(telegramFetchLog ?? "Telegram fetch ignored.")
+            return
+        }
+
+        isProcessing = true
+        statusMessage = "Reading messages from Telegram..."
+        telegramFetchLog = "Starting Telegram fetch..."
+        AppSecurity.debugLog("Telegram SMS scan started. configured=\(telegramConfigured)")
+
+        defer {
+            isProcessing = false
+            AppSecurity.debugLog("Telegram SMS scan finished. status=\(statusMessage ?? "none")")
+        }
+
+        do {
+            AppSecurity.debugLog("Telegram fetch: verifying active bot identity.")
+            let identity = try await telegramService.fetchBotIdentity()
+            telegramFetchLog = "Using Telegram bot \(identity.displayName). Reading messages..."
+            AppSecurity.debugLog("Telegram fetch: requesting updates from Bot API.")
+            let telegramMessages = try await telegramService.fetchNewMessages()
+            let fetchedMessage = "Telegram returned \(telegramMessages.count) new message\(telegramMessages.count == 1 ? "" : "s")."
+            telegramFetchLog = fetchedMessage
+            AppSecurity.debugLog(fetchedMessage)
+            guard !telegramMessages.isEmpty else {
+                statusMessage = "No new Telegram messages to import. If you expected messages, send a new message to the bot and try again."
+                telegramFetchLog = statusMessage
+                return
+            }
+
+            let clippedMessages = telegramMessages.map {
+                AppSecurity.clippedSensitiveText($0.text, limit: AppSecurity.maxSharedTextCharacters)
+            }
+            let eligibleCount = clippedMessages.filter { InvoiceParser.looksLikeExpenseSMS(text: $0) }.count
+            telegramFetchLog = "Parsing \(clippedMessages.count) Telegram message\(clippedMessages.count == 1 ? "" : "s"); \(eligibleCount) eligible for Expense Manager..."
+            AppSecurity.debugLog("Telegram Expense Manager eligibility: newSms=\(clippedMessages.count), eligibleForExpenseParsing=\(eligibleCount), ineligible=\(clippedMessages.count - eligibleCount)")
+            let result = await importSMSMessages(clippedMessages, source: "Telegram")
+            AppSecurity.debugLog("Telegram Expense Manager processing summary: eligible=\(result.eligible), imported=\(result.imported), skipped=\(result.skipped), reversals=\(result.reversals), reversalsMatched=\(result.reversalsMatched)")
+            applySMSImportStatus(result, source: "Telegram", noMessagesFallback: "No Telegram expenses found.")
+            telegramFetchLog = statusMessage
+        } catch {
+            statusMessage = AppSecurity.safeUserMessage(for: error, fallback: "Could not read Telegram messages. Please try again.")
+            telegramFetchLog = statusMessage
+            AppSecurity.debugLog("Telegram scan failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+        }
+    }
+
+    // MARK: - SMS inbox ingestion (iOS Shortcuts automation via Supabase)
+
+    /// Pulls pending rows from the Supabase `sms_inbox` table (populated by the `receive-sms`
+    /// Edge Function via an iOS Shortcuts automation), routes each through the same expense
+    /// pipeline as pasted/Telegram SMS, and marks each row processed/skipped/failed.
+    /// Refreshes the pending/failed row counts so the Scan SMS sheet can show inbox health
+    /// without needing to open the Supabase SQL editor.
+    func refreshSMSInboxCounts() async {
+        do {
+            let counts = try await supabaseService.fetchSMSInboxCounts()
+            smsInboxPendingCount = counts.pending
+            smsInboxFailedCount = counts.failed
+        } catch {
+            AppSecurity.debugLog("SMS inbox count refresh failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+        }
+    }
+
+    func importSMSFromInbox() async {
+        guard !isProcessing else {
+            smsInboxFetchLog = "SMS inbox scan ignored because another scan is already running."
+            AppSecurity.debugLog(smsInboxFetchLog ?? "SMS inbox scan ignored.")
+            return
+        }
+
+        isProcessing = true
+        statusMessage = "Checking SMS inbox..."
+        smsInboxFetchLog = "Checking SMS inbox..."
+        AppSecurity.debugLog("SMS inbox scan started.")
+
+        defer {
+            isProcessing = false
+            AppSecurity.debugLog("SMS inbox scan finished. status=\(statusMessage ?? "none")")
+        }
+
+        do {
+            let rows = try await supabaseService.fetchPendingSMSInbox()
+            smsInboxFetchLog = "SMS inbox returned \(rows.count) pending message\(rows.count == 1 ? "" : "s")."
+            AppSecurity.debugLog(smsInboxFetchLog ?? "")
+            guard !rows.isEmpty else {
+                statusMessage = "No new SMS inbox messages to import."
+                smsInboxFetchLog = statusMessage
+                return
+            }
+
+            let result = await processSMSInboxRows(rows)
+            applySMSImportStatus(result, source: "SMS inbox", noMessagesFallback: "No SMS inbox expenses found.")
+            smsInboxFetchLog = statusMessage
+        } catch {
+            statusMessage = AppSecurity.safeUserMessage(for: error, fallback: "Could not read the SMS inbox. Please try again.")
+            smsInboxFetchLog = statusMessage
+            AppSecurity.debugLog("SMS inbox scan failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+        }
+        await refreshSMSInboxCounts()
+    }
+
+    /// Runs each pending inbox row through the expense pipeline and marks it processed/skipped/failed
+    /// so a re-scan never imports the same SMS twice.
+    private func processSMSInboxRows(_ rows: [SupabaseService.SMSInboxRow], presentImmediately: Bool = true) async -> SMSImportResult {
+        var result = SMSImportResult()
+
+        for (index, row) in rows.enumerated() {
+            let smsText = AppSecurity.clippedSensitiveText(row.body, limit: AppSecurity.maxSharedTextCharacters)
+            guard !smsText.isEmpty else {
+                await markSMSInboxSafely(row.id, status: "skipped", errorMessage: "Empty body")
+                result.skipped += 1
+                continue
+            }
+
+            AppSecurity.debugLog("SMS inbox message scanned #\(index + 1).")
+
+            guard InvoiceParser.looksLikeExpenseSMS(text: smsText) else {
+                await markSMSInboxSafely(row.id, status: "skipped", errorMessage: nil)
+                result.skipped += 1
+                AppSecurity.debugLog("SMS inbox skipped #\(index + 1), reason=not an expense alert.")
+                continue
+            }
+            result.eligible += 1
+
+            do {
+                var invoice = try await invoiceFromExtractedText("SMS Expense Alert:\n\(smsText)")
+                if invoice.date == nil {
+                    invoice.date = row.receivedAt ?? Date()
+                }
+
+                let reversal = await applyReversalIfPresent(for: invoice, source: "SMS inbox")
+                if reversal.isReversal {
+                    result.reversals += 1
+                    if reversal.removedOriginal {
+                        result.reversalsMatched += 1
+                    }
+                    rememberReviewedReceipt(invoice, action: "reversal-processed")
+                    await markSMSInboxSafely(row.id, status: "processed", errorMessage: nil)
+                    AppSecurity.debugLog("SMS inbox reversal handled #\(index + 1), removedOriginal=\(reversal.removedOriginal).")
+                    continue
+                }
+
+                if hasLikelyDuplicate(for: invoice) {
+                    result.skipped += 1
+                    await markSMSInboxSafely(row.id, status: "skipped", errorMessage: "Likely duplicate")
+                    AppSecurity.debugLog("SMS inbox duplicate skipped #\(index + 1).")
+                    continue
+                }
+
+                enqueuePendingReceipt(invoice: invoice, imageData: nil, presentImmediately: presentImmediately)
+                result.imported += 1
+                result.lastImported = invoice
+                await markSMSInboxSafely(row.id, status: "processed", errorMessage: nil)
+                AppSecurity.debugLog("SMS inbox identified #\(index + 1).")
+            } catch {
+                result.skipped += 1
+                await markSMSInboxSafely(row.id, status: "failed", errorMessage: AppSecurity.redactedDiagnostic(error.localizedDescription))
+                AppSecurity.debugLog("SMS inbox parse failed #\(index + 1): \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+            }
+        }
+
+        return result
+    }
+
+    private func markSMSInboxSafely(_ id: UUID, status: String, errorMessage: String?) async {
+        do {
+            try await supabaseService.markSMSInbox(id: id, status: status, receiptId: nil, errorMessage: errorMessage)
+        } catch {
+            AppSecurity.debugLog("Failed to update sms_inbox row \(id): \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+        }
+    }
+
+    private struct AgentSMSInboxResult {
+        var attempted = false
+        var messagesRead = 0
+        var imported = 0
+        var skipped = 0
+        var reversals = 0
+        var reversalsMatched = 0
+        var logLines: [String] = []
+        var errorMessage: String? = nil
+        var lastImported: Invoice? = nil
+    }
+
+    /// Reads pending SMS inbox rows as part of an agent scan run. Silent and non-throwing:
+    /// returns counts and log lines so the caller can fold them into its summary.
+    private func scanSMSInboxForAgent(presentImmediately: Bool) async -> AgentSMSInboxResult {
+        var out = AgentSMSInboxResult()
+        out.attempted = true
+        do {
+            let rows = try await supabaseService.fetchPendingSMSInbox()
+            out.messagesRead = rows.count
+            guard !rows.isEmpty else {
+                out.logLines.append("No new SMS inbox messages found.")
+                return out
+            }
+
+            let result = await processSMSInboxRows(rows, presentImmediately: presentImmediately)
+            out.imported = result.imported
+            out.skipped = result.skipped
+            out.reversals = result.reversals
+            out.reversalsMatched = result.reversalsMatched
+            out.lastImported = result.lastImported
+            out.logLines.append("SMS inbox messages read: \(rows.count)")
+            out.logLines.append("New SMS inbox receipts queued: \(result.imported)\(result.skipped > 0 ? ", skipped \(result.skipped)" : "").")
+            if result.reversals > 0 {
+                out.logLines.append("SMS inbox reversals: \(result.reversals) (matched \(result.reversalsMatched) original charge\(result.reversalsMatched == 1 ? "" : "s")).")
+            }
+        } catch {
+            out.errorMessage = AppSecurity.safeUserMessage(for: error, fallback: "SMS inbox scan could not complete.")
+            AppSecurity.debugLog("Agent SMS inbox scan failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+            out.logLines.append("SMS inbox scan error: \(out.errorMessage ?? "unknown")")
+        }
+        return out
+    }
+
+    private struct SMSImportResult {
+        var eligible = 0
+        var imported = 0
+        var skipped = 0
+        var reversals = 0
+        var reversalsMatched = 0
+        var lastImported: Invoice? = nil
+    }
+
+    private func importSMSMessages(_ messages: [String], source: String, presentImmediately: Bool = true) async -> SMSImportResult {
+        var result = SMSImportResult()
 
         for (index, message) in messages.enumerated() {
             let smsText = message.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !smsText.isEmpty else { continue }
 
-            AppSecurity.debugLog("SMS scanned #\(index + 1).")
+            AppSecurity.debugLog("\(source) message scanned #\(index + 1).")
 
             guard InvoiceParser.looksLikeExpenseSMS(text: smsText) else {
-                skippedCount += 1
-                AppSecurity.debugLog("SMS skipped #\(index + 1), reason=not an expense alert.")
+                result.skipped += 1
+                AppSecurity.debugLog("\(source) skipped #\(index + 1), reason=not an expense alert.")
                 continue
             }
+            result.eligible += 1
 
             do {
                 var invoice = try await invoiceFromExtractedText("SMS Expense Alert:\n\(smsText)")
@@ -1325,28 +1718,116 @@ class ReceiptStore: ObservableObject {
                     invoice.date = Date()
                 }
 
-                if hasLikelyDuplicate(for: invoice) {
-                    skippedCount += 1
-                    AppSecurity.debugLog("SMS duplicate skipped #\(index + 1).")
+                // Reversal/refund alerts cancel out the matching original charge instead
+                // of being recorded as a new expense.
+                let reversal = await applyReversalIfPresent(for: invoice, source: source)
+                if reversal.isReversal {
+                    result.reversals += 1
+                    if reversal.removedOriginal {
+                        result.reversalsMatched += 1
+                    }
+                    rememberReviewedReceipt(invoice, action: "reversal-processed")
+                    AppSecurity.debugLog("\(source) reversal handled #\(index + 1), removedOriginal=\(reversal.removedOriginal).")
                     continue
                 }
 
-                enqueuePendingReceipt(invoice: invoice, imageData: nil)
-                importedCount += 1
-                AppSecurity.debugLog("SMS identified #\(index + 1).")
+                if hasLikelyDuplicate(for: invoice) {
+                    result.skipped += 1
+                    AppSecurity.debugLog("\(source) duplicate skipped #\(index + 1).")
+                    continue
+                }
+
+                enqueuePendingReceipt(invoice: invoice, imageData: nil, presentImmediately: presentImmediately)
+                result.imported += 1
+                result.lastImported = invoice
+                AppSecurity.debugLog("\(source) identified #\(index + 1).")
             } catch {
-                skippedCount += 1
-                AppSecurity.debugLog("SMS parse failed #\(index + 1): \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+                result.skipped += 1
+                AppSecurity.debugLog("\(source) parse failed #\(index + 1): \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
             }
         }
 
-        if importedCount > 0 {
-            statusMessage = "SMS scan found \(importedCount) expense\(importedCount == 1 ? "" : "s") for review.\(skippedCount > 0 ? " Skipped \(skippedCount)." : "")"
-        } else {
-            statusMessage = skippedCount > 0 ? "No new SMS expenses found. Skipped \(skippedCount) message\(skippedCount == 1 ? "" : "s")." : "No SMS expenses found."
+        return result
+    }
+
+    private struct AgentTelegramResult {
+        var attempted = false
+        var messagesRead = 0
+        var imported = 0
+        var skipped = 0
+        var reversals = 0
+        var reversalsMatched = 0
+        var logLines: [String] = []
+        var errorMessage: String? = nil
+        var lastImported: Invoice? = nil
+    }
+
+    /// Reads new Telegram messages as part of an agent scan run. Silent and non-throwing:
+    /// returns counts and log lines so the caller can fold them into its summary. Does not
+    /// touch `isProcessing`/`gmailAgentIsRunning` (the caller owns those).
+    private func scanTelegramForAgent(presentImmediately: Bool) async -> AgentTelegramResult {
+        var out = AgentTelegramResult()
+        guard telegramService.isConfigured() else {
+            out.logLines.append("Telegram not connected — skipped.")
+            return out
         }
 
-        isProcessing = false
+        out.attempted = true
+        do {
+            let telegramMessages = try await telegramService.fetchNewMessages()
+            out.messagesRead = telegramMessages.count
+            guard !telegramMessages.isEmpty else {
+                out.logLines.append("No new Telegram messages found.")
+                return out
+            }
+
+            let clippedMessages = telegramMessages.map {
+                AppSecurity.clippedSensitiveText($0.text, limit: AppSecurity.maxSharedTextCharacters)
+            }
+            let result = await importSMSMessages(clippedMessages, source: "Telegram", presentImmediately: presentImmediately)
+            out.imported = result.imported
+            out.skipped = result.skipped
+            out.reversals = result.reversals
+            out.reversalsMatched = result.reversalsMatched
+            out.lastImported = result.lastImported
+            out.logLines.append("Telegram messages read: \(telegramMessages.count)")
+            out.logLines.append("New Telegram receipts queued: \(result.imported)\(result.skipped > 0 ? ", skipped \(result.skipped)" : "").")
+            if result.reversals > 0 {
+                out.logLines.append("Telegram reversals: \(result.reversals) (matched \(result.reversalsMatched) original charge\(result.reversalsMatched == 1 ? "" : "s")).")
+            }
+        } catch {
+            out.errorMessage = AppSecurity.safeUserMessage(for: error, fallback: "Telegram scan could not complete.")
+            AppSecurity.debugLog("Agent Telegram scan failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+            out.logLines.append("Telegram scan error: \(out.errorMessage ?? "unknown")")
+        }
+        return out
+    }
+
+    private func applySMSImportStatus(_ result: SMSImportResult, source: String, noMessagesFallback: String) {
+        let reversalDetail = result.reversals > 0
+            ? " Processed \(result.reversals) reversal\(result.reversals == 1 ? "" : "s")\(result.reversalsMatched > 0 ? ", removed \(result.reversalsMatched) original charge\(result.reversalsMatched == 1 ? "" : "s")" : "")."
+            : ""
+        if result.imported > 0 {
+            let lastDetail = lastReceiptDetail(for: result.lastImported).map { " Last: \($0)." } ?? ""
+            statusMessage = "\(source) scan found \(result.imported) expense\(result.imported == 1 ? "" : "s") for review.\(result.skipped > 0 ? " Skipped \(result.skipped)." : "")\(reversalDetail)\(lastDetail)"
+        } else if result.reversals > 0 {
+            statusMessage = "No new expenses found.\(reversalDetail)"
+        } else {
+            statusMessage = result.skipped > 0
+                ? "No new expenses found. Skipped \(result.skipped) message\(result.skipped == 1 ? "" : "s")."
+                : noMessagesFallback
+        }
+    }
+
+    /// Short "amount • date" description of the most recently imported receipt for scan popups.
+    private func lastReceiptDetail(for invoice: Invoice?) -> String? {
+        guard let invoice else { return nil }
+        let amountText = invoice.reportingTotal(defaultCurrencyCode: defaultCurrencyCode)
+            .map { $0.formatted(.currency(code: defaultCurrencyCode)) }
+            ?? invoice.total.map { $0.formatted(.currency(code: invoice.currency ?? defaultCurrencyCode)) }
+            ?? "amount pending"
+        let dateText = invoice.date.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .none) } ?? "no date"
+        return "\(amountText) on \(dateText)"
     }
 
     private static func smsMessageChunks(from text: String) -> [String] {
@@ -1545,6 +2026,72 @@ class ReceiptStore: ObservableObject {
         }
 
         isProcessing = false
+    }
+
+    // MARK: - Reversal / refund handling
+
+    struct ReversalOutcome {
+        var isReversal = false
+        var removedOriginal = false
+    }
+
+    /// If `invoice` is a reversal/refund alert, cancel out the matching original charge
+    /// (same amount + business entity) instead of recording it as a new expense.
+    /// Searches the pending review queue and saved receipts. Returns whether the invoice
+    /// was a reversal (so callers can skip enqueuing it) and whether an original was removed.
+    @discardableResult
+    private func applyReversalIfPresent(for invoice: Invoice, source: String) async -> ReversalOutcome {
+        var outcome = ReversalOutcome()
+        let text = "\(invoice.category ?? "")\n\(invoice.rawText)"
+        guard InvoiceParser.isReversalTransaction(text: text) else {
+            return outcome
+        }
+        outcome.isReversal = true
+        AppSecurity.debugLog("\(source) reversal alert detected; searching for original charge to cancel.")
+
+        // 1. Remove a matching not-yet-presented pending receipt.
+        if let queueIndex = pendingReceiptQueue.firstIndex(where: { reversalMatchesOriginal(reversal: invoice, original: $0.invoice) }) {
+            let removed = pendingReceiptQueue.remove(at: queueIndex)
+            rememberReviewedReceipt(removed.invoice, action: "reversal-cancelled-pending")
+            outcome.removedOriginal = true
+            AppSecurity.debugLog("\(source) reversal cancelled a queued pending receipt.")
+            return outcome
+        }
+
+        // 2. Cancel the receipt currently presented for review.
+        if let currentPending = pendingReceipt, reversalMatchesOriginal(reversal: invoice, original: currentPending.invoice) {
+            rememberReviewedReceipt(currentPending.invoice, action: "reversal-cancelled-pending")
+            pendingReceipt = nil
+            presentNextPendingReceipt()
+            outcome.removedOriginal = true
+            AppSecurity.debugLog("\(source) reversal cancelled the receipt under review.")
+            return outcome
+        }
+
+        // 3. Delete a matching already-saved receipt. Prefer the most recent match.
+        if let saved = invoices
+            .filter({ reversalMatchesOriginal(reversal: invoice, original: $0) })
+            .sorted(by: { ($0.date ?? Date.distantPast) > ($1.date ?? Date.distantPast) })
+            .first {
+            await deleteInvoice(saved)
+            outcome.removedOriginal = true
+            AppSecurity.debugLog("\(source) reversal deleted a previously saved receipt.")
+        }
+
+        return outcome
+    }
+
+    /// A reversal matches an original charge when the amounts are equal and the business
+    /// entity (merchant or card identity) lines up. Dates are not required because a
+    /// reversal can post days after the original charge.
+    private func reversalMatchesOriginal(reversal: Invoice, original: Invoice) -> Bool {
+        guard let reversalAmount = amountKey(for: reversal.total),
+              let originalAmount = amountKey(for: original.total),
+              reversalAmount == originalAmount else {
+            return false
+        }
+        return merchantKeysMatch(reversal.merchant, original.merchant)
+            || creditCardIdentityMatches(reversal, original)
     }
 
     static let sampleReceiptText = """
