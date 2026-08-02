@@ -73,6 +73,37 @@ actor PaymentMappingService {
         try await findPaymentMethod(lastDigits: lastDigits)?.id
     }
 
+    /// Saves (or corrects) a card→bank pairing so every future receipt with this last-4 auto-fills
+    /// the right bank. Best-effort: a failure here shouldn't block the receipt save that triggered
+    /// it, so errors are swallowed rather than thrown.
+    func upsertPaymentMethod(lastDigits: String, bankName: String, cardName: String? = nil) async {
+        guard let normalizedLast4 = Self.normalizedLast4(from: lastDigits) else { return }
+        let trimmedBank = bankName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBank.isEmpty, trimmedBank != "Unknown Bank" else { return }
+
+        guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/payment_methods"), resolvingAgainstBaseURL: false) else { return }
+        components.queryItems = [URLQueryItem(name: "on_conflict", value: "last_digits")]
+        guard let url = components.url else { return }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        if canUseBearerAuthorization {
+            req.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+        }
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
+
+        var body: [String: Any] = ["last_digits": normalizedLast4, "bank_name": trimmedBank]
+        if let cardName, !cardName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            body["card_name"] = cardName
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+        req.httpBody = data
+
+        _ = try? await URLSession.shared.data(for: req)
+    }
+
     func fetchPaymentMethods() async throws -> [PaymentMethod] {
         guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/payment_methods"), resolvingAgainstBaseURL: false) else {
             return []

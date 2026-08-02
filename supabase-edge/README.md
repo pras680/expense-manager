@@ -23,3 +23,26 @@ Usage
 Notes
 - The prompt enforces a JSON-only assistant reply; you may need to adapt parsing if the LLM returns additional text.
 - For higher accuracy, consider sending image binary or PDF and running OCR server-side (with Tesseract or Vision) before LLM parsing.
+
+---
+
+Supabase Edge Function: receive-sms
+
+Purpose
+- Ingests forwarded bank/payment SMS text (e.g. from an iOS Shortcuts automation) into the `sms_inbox` table so the app's "Scan SMS" feature can pick up unprocessed messages.
+
+Setup
+1. Run `sms-inbox-schema.sql` in the Supabase SQL editor to create the `sms_inbox` table and RLS policies.
+2. Set environment variables for the function:
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — used to insert with RLS bypassed
+   - `SMS_INGEST_SECRET` — shared secret required in the `x-sms-ingest-secret` header
+3. Deploy the function:
+
+```bash
+cd supabase-edge/receive-sms
+supabase functions deploy receive-sms
+```
+
+Usage
+- POST JSON to the function URL with `{ "body": "...", "sender": "...", "source": "ios-shortcut" }` and header `x-sms-ingest-secret: <SMS_INGEST_SECRET>`.
+- Rows are inserted with `status = 'pending'`. The app's Tools → Scan SMS action reads pending/failed rows oldest-first, parses each into a receipt for review, and marks the row `processed`, `skipped`, or `failed` so nothing is imported twice.

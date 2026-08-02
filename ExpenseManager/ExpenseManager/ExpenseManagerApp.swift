@@ -15,6 +15,10 @@ struct ExpenseManagerApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(supabaseService: supabaseService)
+                // AppTheme is a single fixed light palette with no dark variant. Without this,
+                // system Dark Mode flips native control text (TextField/TextEditor/Picker) to
+                // white, which renders unreadable against the light AppTheme.surface/bg fills.
+                .preferredColorScheme(.light)
         }
     }
 }

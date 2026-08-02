@@ -21,6 +21,7 @@ struct ReceiptsDashboardView: View {
             .scrollContentBackground(.hidden)
             .background(AppTheme.bg)
             .toolbar(.hidden, for: .navigationBar)
+            .refreshable { await store.loadReceipts() }
             .alert("Delete receipt?", isPresented: $showingDeleteConfirmation, actions: {
                 Button("Delete", role: .destructive) {
                     guard let invoice = activeInvoice else { return }
@@ -123,6 +124,8 @@ struct ReceiptsDashboardView: View {
                     TextField("Search merchant, amount, or date", text: $store.searchText)
                         .focused($searchFocused)
                         .font(AppFont.body15)
+                        .foregroundStyle(AppTheme.text)
+                        .tint(AppTheme.accent700)
                         .textInputAutocapitalization(.never)
                     if !store.searchText.isEmpty {
                         Button {

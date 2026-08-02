@@ -34,7 +34,9 @@ enum AppTheme {
     // Neutral ramp
     static let neutral600 = Color(hex: 0x7D7979)
     static let neutral700 = Color(hex: 0x605D5D)
-    static let textMuted = text.opacity(0.55)
+    // 0.65 (not the mockup's original 0.55) so secondary/caption text clears WCAG AA (4.5:1)
+    // against both `bg` and `surface` — 0.55 measured ~3.6:1, a real readability regression.
+    static let textMuted = text.opacity(0.65)
 
     // Spacing scale
     static let space1: CGFloat = 4
@@ -145,7 +147,9 @@ struct TagView: View {
             .tracking(0.3)
             .padding(.horizontal, AppTheme.space3)
             .padding(.vertical, AppTheme.space2 - 2)
-            .foregroundStyle(style == .solid ? AppTheme.bg : AppTheme.accent)
+            // `accent` on `bg`/`surface` measures ~3.8:1 — fine for a 1px border, too low for
+            // small caption text, so outline-style labels use the darker `accent700` instead.
+            .foregroundStyle(style == .solid ? AppTheme.bg : AppTheme.accent700)
             .background(style == .solid ? AppTheme.accent : Color.clear)
             .overlay(
                 Rectangle().stroke(AppTheme.accent, lineWidth: style == .outline ? 1 : 0)
@@ -198,6 +202,8 @@ struct FlatField<Content: View>: View {
                 .foregroundStyle(AppTheme.textMuted)
             content
                 .font(AppFont.body15)
+                .foregroundStyle(AppTheme.text)
+                .tint(AppTheme.accent700)
                 .padding(.horizontal, AppTheme.space3 - 2)
                 .padding(.vertical, AppTheme.space2 + 2)
                 .background(AppTheme.surface)

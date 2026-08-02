@@ -80,10 +80,21 @@ struct ReceiptEditorView: View {
                         .frame(width: 90)
                     }
                     FlatField(label: "Raw OCR Text") {
-                        TextEditor(text: $rawText)
-                            .font(.system(size: 11, design: .monospaced))
-                            .frame(minHeight: 110)
-                            .scrollContentBackground(.hidden)
+                        ZStack(alignment: .topLeading) {
+                            if rawText.isEmpty {
+                                Text("No raw text was captured for this receipt.")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(AppTheme.textMuted)
+                                    .padding(.top, 8)
+                                    .padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                            }
+                            TextEditor(text: $rawText)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(AppTheme.text)
+                                .frame(minHeight: 110)
+                                .scrollContentBackground(.hidden)
+                        }
                     }
                     Button("Delete Receipt") {
                         showingDeleteConfirmation = true
@@ -126,7 +137,7 @@ struct ReceiptEditorView: View {
                 save()
             }
             .font(AppFont.headline)
-            .foregroundStyle(AppTheme.accent)
+            .foregroundStyle(AppTheme.accent700)
             .disabled(merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Decimal(string: totalText.replacingOccurrences(of: ",", with: "")) == nil)
         }
         .padding(.horizontal, AppTheme.space4)

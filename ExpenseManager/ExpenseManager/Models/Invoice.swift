@@ -50,6 +50,7 @@ extension Invoice {
         "Health",
         "Home",
         "Subscriptions",
+        "ATM Cash Withdrawal",
         "Miscellaneous"
     ]
 
@@ -79,9 +80,24 @@ extension Invoice {
         let dateString = dictionary["date"] as? String
         let fileUrl = dictionary["file_url"] as? String
         let currency = dictionary["currency"] as? String
-        let category = dictionary["category"] as? String
-        let cardLast4 = dictionary["card_last4"] as? String
-        let cardBank = dictionary["card_bank"] as? String
+
+        // `raw_text` isn't a top-level column; it's stored inside `raw_ocr_json` at insert time
+        // (see SupabaseService.insertReceiptToDB) and must be read back from there. PostgREST
+        // normally embeds jsonb columns as a nested object, but fall back to string-decoding it
+        // in case the column ever comes back JSON-encoded as text.
+        var rawOcrJson = dictionary["raw_ocr_json"] as? [String: Any]
+        if rawOcrJson == nil, let jsonString = dictionary["raw_ocr_json"] as? String, let data = jsonString.data(using: .utf8) {
+            rawOcrJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        }
+        let rawText = (rawOcrJson?["raw_text"] as? String) ?? ""
+
+        // A number of existing rows (written by an earlier build of the insert path) only ever
+        // populated these fields inside raw_ocr_json and left the top-level columns NULL — which
+        // silently dropped those receipts into "Miscellaneous" and hid their card info in Reports.
+        // Fall back to the nested copy whenever the column itself is empty.
+        let category = (dictionary["category"] as? String)?.nilIfEmpty ?? (rawOcrJson?["category"] as? String)?.nilIfEmpty
+        let cardLast4 = (dictionary["card_last4"] as? String)?.nilIfEmpty ?? (rawOcrJson?["card_last4"] as? String)?.nilIfEmpty
+        let cardBank = (dictionary["card_bank"] as? String)?.nilIfEmpty ?? (rawOcrJson?["card_bank"] as? String)?.nilIfEmpty
 
         let total: Decimal?
         if let number = dictionary["total"] as? NSNumber {
@@ -101,7 +117,7 @@ extension Invoice {
             category: category,
             cardLast4: cardLast4,
             cardBank: cardBank,
-            rawText: "",
+            rawText: rawText,
             fileUrl: fileUrl
         )
     }
@@ -190,7 +206,8 @@ struct InvoiceParser {
             ("Travel", ["hotel", "airline", "uber", "lyft", "taxi", "parking", "airport", "train", "transit", "rental car"]),
             ("Health", ["pharmacy", "cvs", "walgreens", "medical", "doctor", "dental", "clinic", "fitness", "gym"]),
             ("Home", ["home depot", "lowes", "hardware", "furniture", "garden", "paint", "tools"]),
-            ("Subscriptions", ["subscription", "membership", "monthly", "annual plan", "renewal"])
+            ("Subscriptions", ["subscription", "membership", "monthly", "annual plan", "renewal"]),
+            ("ATM Cash Withdrawal", ["atm", "cash withdrawal", "cash advance", "withdrawal fee"])
         ]
 
         for (category, keywords) in categoryKeywords {
@@ -218,6 +235,21 @@ struct InvoiceParser {
             }
         }
         return nil
+    }
+
+    /// Heuristic gate so SMS inbox / pasted SMS scans don't waste edge-function calls on OTPs,
+    /// balance enquiries, or other non-expense texts before running the full parser.
+    static func looksLikeExpenseSMS(text: String) -> Bool {
+        let normalized = text.lowercased()
+        let hasMoney = findLargestAmount(in: text) != nil || normalized.contains("sgd") || normalized.contains("s$")
+        let hasTransactionCue = [
+            "spent", "purchase", "transaction", "payment", "paid", "debit", "charged",
+            "card ending", "card no", "paynow", "paylah", "transfer", "sent to", "paid to", "merchant"
+        ].contains { normalized.contains($0) }
+        let hasNonExpenseCue = [
+            "otp", "one-time password", "verification code", "login", "balance enquiry", "available balance only"
+        ].contains { normalized.contains($0) }
+        return hasMoney && hasTransactionCue && !hasNonExpenseCue
     }
 
     static func findLargestAmount(in text: String) -> Decimal? {

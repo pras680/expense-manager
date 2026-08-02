@@ -1,5 +1,45 @@
 import Foundation
 
+/// Centralized privacy/security helpers for client-side sanitization and diagnostics.
+enum AppSecurity {
+    static let maxExtractedTextCharacters = 18_000
+    static let maxSharedTextCharacters = 8_000
+
+    static func clippedSensitiveText(_ text: String, limit: Int = maxExtractedTextCharacters) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > limit else { return trimmed }
+        return String(trimmed.prefix(limit))
+    }
+
+    static func safeUserMessage(for error: Error, fallback: String) -> String {
+        let nsError = error as NSError
+        if ["PostgREST", "SupabaseStorage", "EdgeFunction", "Gmail"].contains(nsError.domain) {
+            return fallback
+        }
+        return error.localizedDescription
+    }
+
+    static func redactedDiagnostic(_ text: String) -> String {
+        var redacted = text
+        let patterns = [
+            #"Bearer\s+[A-Za-z0-9._\-]+"#,
+            #"sb_publishable_[A-Za-z0-9_\-]+"#,
+            #"eyJ[A-Za-z0-9._\-]+"#,
+            #"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|authorization)\"?\s*[:=]\s*\"?[^\"\s,}]+"#
+        ]
+        for pattern in patterns {
+            redacted = redacted.replacingOccurrences(of: pattern, with: "[REDACTED]", options: .regularExpression)
+        }
+        return String(redacted.prefix(1_000))
+    }
+
+    static func debugLog(_ message: String) {
+        #if DEBUG
+        print("DEBUG: \(message)")
+        #endif
+    }
+}
+
 struct ParsedReceipt: Codable {
     var merchant: String?
     var date: String?
@@ -225,5 +265,123 @@ actor SupabaseService {
         }
 
         throw NSError(domain: "PostgREST", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not parse inserted id"])
+    }
+
+    // MARK: - SMS inbox (iOS Shortcuts automation via the `receive-sms` Edge Function)
+
+    struct SMSInboxRow {
+        let id: UUID
+        let body: String
+        let sender: String?
+        let receivedAt: Date?
+    }
+
+    /// Rows queued in Supabase `sms_inbox`, oldest first, not yet successfully processed.
+    /// Includes `failed` rows so a transient error gets retried on the next scan.
+    func fetchPendingSMSInbox(limit: Int = 25) async throws -> [SMSInboxRow] {
+        guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/sms_inbox"), resolvingAgainstBaseURL: false) else {
+            throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL for SMS inbox fetch"])
+        }
+        components.queryItems = [
+            URLQueryItem(name: "select", value: "id,body,sender,received_at"),
+            URLQueryItem(name: "or", value: "(status.eq.pending,status.eq.failed)"),
+            URLQueryItem(name: "order", value: "received_at.asc"),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        guard let url = components.url else {
+            throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL components for SMS inbox fetch"])
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        applySupabaseHeaders(to: &req)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "PostgREST", code: 1, userInfo: [NSLocalizedDescriptionKey: "SMS inbox fetch failed: \(text)"])
+        }
+
+        guard let rows = try JSONSerialization.jsonObject(with: data, options: []) as? [[String: Any]] else {
+            throw NSError(domain: "PostgREST", code: 2, userInfo: [NSLocalizedDescriptionKey: "Unexpected SMS inbox fetch response"])
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions.insert(.withFractionalSeconds)
+        return rows.compactMap { row in
+            guard let idString = row["id"] as? String, let id = UUID(uuidString: idString),
+                  let body = row["body"] as? String else { return nil }
+            let sender = row["sender"] as? String
+            let receivedAtString = row["received_at"] as? String
+            let receivedAt = receivedAtString.flatMap { formatter.date(from: $0) } ?? receivedAtString.flatMap { ISO8601DateFormatter().date(from: $0) }
+            return SMSInboxRow(id: id, body: body, sender: sender, receivedAt: receivedAt)
+        }
+    }
+
+    /// Counts of rows awaiting attention, so the app can surface inbox health without a SQL query.
+    func fetchSMSInboxCounts() async throws -> (pending: Int, failed: Int) {
+        async let pending = fetchSMSInboxCount(status: "pending")
+        async let failed = fetchSMSInboxCount(status: "failed")
+        return (try await pending, try await failed)
+    }
+
+    private func fetchSMSInboxCount(status: String) async throws -> Int {
+        guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/sms_inbox"), resolvingAgainstBaseURL: false) else {
+            throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL for SMS inbox count"])
+        }
+        components.queryItems = [
+            URLQueryItem(name: "select", value: "id"),
+            URLQueryItem(name: "status", value: "eq.\(status)"),
+            URLQueryItem(name: "limit", value: "1")
+        ]
+        guard let url = components.url else {
+            throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL components for SMS inbox count"])
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        applySupabaseHeaders(to: &req, prefer: "count=exact")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "PostgREST", code: 1, userInfo: [NSLocalizedDescriptionKey: "SMS inbox count failed: \(text)"])
+        }
+
+        let contentRange = http.value(forHTTPHeaderField: "Content-Range") ?? ""
+        guard let totalString = contentRange.split(separator: "/").last, let total = Int(totalString) else {
+            return 0
+        }
+        return total
+    }
+
+    /// Marks an `sms_inbox` row processed/skipped/failed after the app has attempted to import it,
+    /// so a re-scan never imports the same SMS twice.
+    func markSMSInbox(id: UUID, status: String, receiptId: UUID?, errorMessage: String?) async throws {
+        guard var components = URLComponents(url: supabaseUrl.appendingPathComponent("/rest/v1/sms_inbox"), resolvingAgainstBaseURL: false) else {
+            throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL for SMS inbox update"])
+        }
+        components.queryItems = [URLQueryItem(name: "id", value: "eq.\(id.uuidString)")]
+        guard let url = components.url else {
+            throw NSError(domain: "PostgREST", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid URL components for SMS inbox update"])
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "PATCH"
+        applySupabaseHeaders(to: &req, contentType: "application/json", prefer: "return=minimal")
+
+        var body: [String: Any] = [
+            "status": status,
+            "processed_at": ISO8601DateFormatter().string(from: Date())
+        ]
+        body["receipt_id"] = receiptId.map { $0.uuidString as Any } ?? NSNull()
+        body["error_message"] = errorMessage.map { AppSecurity.clippedSensitiveText($0, limit: 500) as Any } ?? NSNull()
+
+        req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw NSError(domain: "PostgREST", code: 1, userInfo: [NSLocalizedDescriptionKey: "SMS inbox update failed: \(text)"])
+        }
     }
 }

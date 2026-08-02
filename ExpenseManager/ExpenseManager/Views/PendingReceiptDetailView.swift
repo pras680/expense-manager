@@ -1,19 +1,39 @@
 import SwiftUI
 
-struct PendingReceiptReviewView: View {
+/// Full single-receipt editor for one line in the pending review queue. Opened via the
+/// "Detail" action on a `PendingReceiptQueueView` row so the extracted fields can be corrected
+/// before approving, or the full receipt message can be read before deciding.
+struct PendingReceiptDetailView: View {
     @ObservedObject var store: ReceiptStore
-    @Binding var pending: ReceiptStore.PendingReceipt?
-    let onConfirm: (Invoice) async -> Void
-    let onDiscard: () -> Void
+    let pending: ReceiptStore.PendingReceipt
+    let onApprove: (Invoice) async -> Void
+    let onReject: () -> Void
+    @Environment(\.dismiss) private var dismiss
 
-    @State private var merchant: String = ""
-    @State private var date: Date = Date()
-    @State private var total: String = ""
-    @State private var currency: String = Invoice.defaultCurrency
-    @State private var category: String = "Miscellaneous"
-    @State private var cardLast4: String = ""
-    @State private var cardBank: String = ""
-    @State private var rawText: String = ""
+    @State private var merchant: String
+    @State private var date: Date
+    @State private var total: String
+    @State private var currency: String
+    @State private var category: String
+    @State private var cardLast4: String
+    @State private var cardBank: String
+    @State private var rawText: String
+    @State private var isSaving = false
+
+    init(store: ReceiptStore, pending: ReceiptStore.PendingReceipt, onApprove: @escaping (Invoice) async -> Void, onReject: @escaping () -> Void) {
+        self.store = store
+        self.pending = pending
+        self.onApprove = onApprove
+        self.onReject = onReject
+        _merchant = State(initialValue: pending.invoice.merchant ?? "")
+        _date = State(initialValue: pending.invoice.date ?? Date())
+        _total = State(initialValue: pending.invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? "")
+        _currency = State(initialValue: pending.invoice.currency ?? Invoice.defaultCurrency)
+        _category = State(initialValue: pending.invoice.category ?? "Miscellaneous")
+        _cardLast4 = State(initialValue: pending.invoice.cardLast4 ?? "")
+        _cardBank = State(initialValue: pending.invoice.cardBank ?? "")
+        _rawText = State(initialValue: pending.invoice.rawText)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,43 +86,58 @@ struct PendingReceiptReviewView: View {
                         }
                         .frame(width: 90)
                     }
-                    FlatField(label: "Raw OCR Text") {
-                        TextEditor(text: $rawText)
-                            .font(.system(size: 11, design: .monospaced))
-                            .frame(minHeight: 120)
-                            .scrollContentBackground(.hidden)
+                    FlatField(label: "Full Receipt Message") {
+                        ZStack(alignment: .topLeading) {
+                            if rawText.isEmpty {
+                                Text("No raw text was captured for this receipt.")
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .foregroundStyle(AppTheme.textMuted)
+                                    .padding(.top, 8)
+                                    .padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                            }
+                            TextEditor(text: $rawText)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(AppTheme.text)
+                                .frame(minHeight: 220)
+                                .scrollContentBackground(.hidden)
+                        }
                     }
-
-                    actionButtons
                 }
                 .padding(AppTheme.space4)
             }
         }
         .background(AppTheme.bg.ignoresSafeArea())
-        .task {
-            guard let pending = pending else { return }
-            merchant = pending.invoice.merchant ?? ""
-            date = pending.invoice.date ?? Date()
-            total = pending.invoice.total.map { NSDecimalNumber(decimal: $0).stringValue } ?? ""
-            currency = pending.invoice.currency ?? Invoice.defaultCurrency
-            category = pending.invoice.category ?? "Miscellaneous"
-            cardLast4 = pending.invoice.cardLast4 ?? ""
-            cardBank = pending.invoice.cardBank ?? ""
-            rawText = pending.invoice.rawText
-        }
     }
 
+    // Reject and Approve & Save both live in the header (not below the scrollable fields) so
+    // approving never requires scrolling past the full receipt message first.
     private var header: some View {
         HStack {
-            Button("Discard") { onDiscard() }
-                .font(AppFont.headline)
-                .foregroundStyle(AppTheme.accent700)
+            Button("Reject") {
+                onReject()
+                dismiss()
+            }
+            .font(AppFont.headline)
+            .foregroundStyle(AppTheme.accent700)
+            .disabled(isSaving)
             Spacer()
-            Text("Review Receipt")
+            Text("Receipt Detail")
                 .font(AppFont.title2)
                 .foregroundStyle(AppTheme.text)
             Spacer()
-            Color.clear.frame(width: 56, height: 1)
+            Button {
+                approve()
+            } label: {
+                if isSaving {
+                    ProgressView()
+                } else {
+                    Text("Approve & Save")
+                }
+            }
+            .font(AppFont.headline)
+            .foregroundStyle(AppTheme.accent)
+            .disabled(isSaving || merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Decimal(string: total.replacingOccurrences(of: ",", with: "")) == nil)
         }
         .padding(.horizontal, AppTheme.space4)
         .padding(.top, AppTheme.space6 + AppTheme.space2)
@@ -118,20 +153,8 @@ struct PendingReceiptReviewView: View {
         .background(AppTheme.divider)
     }
 
-    private var actionButtons: some View {
-        VStack(spacing: AppTheme.space3) {
-            Button("Approve & Save", action: approve)
-                .buttonStyle(FlatPrimaryButtonStyle())
-                .disabled(merchant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || Decimal(string: total.replacingOccurrences(of: ",", with: "")) == nil)
-
-            Button("Reject", action: onDiscard)
-                .buttonStyle(FlatSecondaryButtonStyle())
-        }
-        .padding(.top, AppTheme.space2)
-    }
-
     private func approve() {
-        guard var invoice = pending?.invoice else { return }
+        var invoice = pending.invoice
         invoice.merchant = merchant.trimmingCharacters(in: .whitespacesAndNewlines)
         invoice.date = date
         invoice.total = Decimal(string: total.replacingOccurrences(of: ",", with: ""))
@@ -140,8 +163,11 @@ struct PendingReceiptReviewView: View {
         invoice.cardLast4 = PaymentMappingService.normalizedLast4(from: cardLast4)
         invoice.cardBank = cardBank.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         invoice.rawText = rawText
+        isSaving = true
         Task {
-            await onConfirm(invoice)
+            await onApprove(invoice)
+            isSaving = false
+            dismiss()
         }
     }
 

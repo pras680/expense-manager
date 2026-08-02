@@ -63,12 +63,21 @@ struct MainTabView: View {
                 store.editingInvoice = nil
             })
         }
-        .sheet(item: $store.pendingReceipt) { _ in
-            PendingReceiptReviewView(store: store, pending: $store.pendingReceipt, onConfirm: { invoice in
-                await store.confirmPendingReceipt(invoice)
-            }, onDiscard: {
-                store.discardPendingReceipt()
-            })
+        .sheet(isPresented: $store.showPendingReview) {
+            PendingReceiptQueueView(store: store)
+        }
+        .sheet(isPresented: $store.showSMSImport) {
+            SMSImportSheet(store: store)
+        }
+        .sheet(isPresented: Binding(
+            get: { store.gmailScanResult != nil },
+            set: { isPresented in
+                if !isPresented { store.cancelGmailImport() }
+            }
+        )) {
+            if let result = store.gmailScanResult {
+                GmailScanConfirmView(store: store, result: result)
+            }
         }
     }
 }
@@ -117,11 +126,32 @@ private struct ToolsView: View {
                     }
                 }
 
+                SectionLabel(text: "Scan Inbox")
+                RuledStack {
+                    RuledRow {
+                        toolRow(title: store.gmailIsScanning ? "Scanning Gmail..." : "Scan Gmail", icon: "envelope.badge.shield.half.filled") {
+                            Task { await store.scanGmailReceipts() }
+                        }
+                    }
+                    RuledRow {
+                        toolRow(title: "Scan SMS", icon: "message.badge.waveform") {
+                            store.showSMSImport = true
+                        }
+                    }
+                }
+                if let gmailLog = store.gmailFetchLog {
+                    Text(gmailLog)
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
+                }
+
                 SectionLabel(text: "Backend Checklist")
                 RuledStack {
                     RuledRow { checklistRow("Edge Function deployed", detail: "/functions/v1/parse-receipt") }
                     RuledRow { checklistRow("Receipts table policies", detail: "Allow anon insert/select or add app auth") }
                     RuledRow { checklistRow("Storage bucket policy", detail: "Allow uploads to receipt-documents") }
+                    RuledRow { checklistRow("SMS inbox table", detail: "Run sms-inbox-schema.sql and deploy receive-sms") }
+                    RuledRow { checklistRow("Google OAuth configured", detail: "iOS client ID + Gmail read-only scope") }
                 }
 
                 HStack(spacing: AppTheme.space2) {
