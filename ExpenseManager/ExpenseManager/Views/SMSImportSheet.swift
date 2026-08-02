@@ -4,8 +4,6 @@ struct SMSImportSheet: View {
     @ObservedObject var store: ReceiptStore
     @Environment(\.dismiss) private var dismiss
     @State private var smsText = ""
-    @State private var telegramToken = ""
-    @State private var showTokenField = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,7 +12,6 @@ struct SMSImportSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: AppTheme.space4) {
                     smsInboxCard
-                    telegramCard
                     pasteCard
                     guidanceCard
                 }
@@ -25,8 +22,6 @@ struct SMSImportSheet: View {
         }
         .background(AppTheme.bg.ignoresSafeArea())
         .onAppear {
-            store.refreshTelegramConfiguration()
-            showTokenField = !store.telegramConfigured
             Task { await store.refreshSMSInboxCounts() }
         }
     }
@@ -97,91 +92,6 @@ struct SMSImportSheet: View {
                     .padding(AppTheme.space3)
                     .background(AppTheme.bg)
                     .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
-            }
-        }
-        .padding(AppTheme.space4)
-        .background(AppTheme.surface)
-        .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
-    }
-
-    private var telegramCard: some View {
-        VStack(alignment: .leading, spacing: AppTheme.space3) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    SectionLabel(text: "Telegram Bot")
-                    Text(store.telegramConfigured ? "Connected" : "Not connected")
-                        .font(AppFont.subhead)
-                        .foregroundStyle(store.telegramConfigured ? AppTheme.accent700 : AppTheme.textMuted)
-                }
-                Spacer()
-                Button(showTokenField ? "Hide" : (store.telegramConfigured ? "Edit Token" : "Add Token")) {
-                    withAnimation { showTokenField.toggle() }
-                }
-                .buttonStyle(FlatSecondaryButtonStyle(fullWidth: false, tint: AppTheme.accent700))
-            }
-
-            Button {
-                store.telegramFetchLog = "Fetch from Telegram tapped."
-                AppSecurity.debugLog("Scan SMS: Fetch from Telegram button tapped. configured=\(store.telegramConfigured), processing=\(store.isProcessing)")
-                Task {
-                    await store.importSMSFromTelegram()
-                    if store.pendingReceipt != nil {
-                        dismiss()
-                    }
-                }
-            } label: {
-                if store.isProcessing {
-                    ProgressView()
-                        .tint(AppTheme.bg)
-                        .frame(maxWidth: .infinity)
-                } else {
-                    Text("Fetch from Telegram")
-                }
-            }
-            .buttonStyle(FlatPrimaryButtonStyle())
-            .disabled(!store.telegramConfigured || store.isProcessing)
-
-            if let telegramFetchLog = store.telegramFetchLog ?? store.statusMessage {
-                Text(telegramFetchLog)
-                    .font(AppFont.subhead)
-                    .foregroundStyle(AppTheme.textMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(AppTheme.space3)
-                    .background(AppTheme.bg)
-                    .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
-            }
-
-            if showTokenField {
-                VStack(alignment: .leading, spacing: AppTheme.space3) {
-                    FlatField(label: "Bot Token") {
-                        SecureField("Bot token from @BotFather", text: $telegramToken)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled(true)
-                    }
-
-                    HStack(spacing: AppTheme.space3) {
-                        Button("Save Token") {
-                            Task {
-                                await store.saveTelegramBotToken(telegramToken)
-                                telegramToken = ""
-                                withAnimation { showTokenField = false }
-                            }
-                        }
-                        .buttonStyle(FlatSecondaryButtonStyle(fullWidth: false, tint: AppTheme.accent700))
-                        .disabled(telegramToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        if store.telegramConfigured {
-                            Button("Remove") {
-                                Task { await store.clearTelegramBotToken() }
-                            }
-                            .buttonStyle(FlatSecondaryButtonStyle(fullWidth: false, tint: AppTheme.accent700))
-                        }
-                    }
-
-                    Text("Your token is stored securely in the device Keychain and only used to read messages relayed to your bot.")
-                        .font(AppFont.subhead)
-                        .foregroundStyle(AppTheme.textMuted)
-                }
             }
         }
         .padding(AppTheme.space4)
