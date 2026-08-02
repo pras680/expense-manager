@@ -191,7 +191,7 @@ private struct ToolsView: View {
             set: { store.setGmailDailyAgentEnabled($0) }
         )) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Daily Gmail + Telegram Agent")
+                Text("Daily Gmail + SMS Inbox Agent")
                     .font(AppFont.headline)
                     .foregroundStyle(AppTheme.text)
                 Text(store.gmailScheduleSubtitle)
