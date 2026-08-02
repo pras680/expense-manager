@@ -248,18 +248,18 @@ struct ReceiptsDashboardView: View {
     }
 
     private func statLink<Destination: View>(title: String, value: String, valueSize: CGFloat = 18, @ViewBuilder destination: () -> Destination) -> some View {
-        NavigationLink {
-            destination()
-        } label: {
-            ZStack(alignment: .topTrailing) {
-                StatCell(title: title, value: value, valueSize: valueSize)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(AppTheme.neutral600)
-                    .padding(AppTheme.space2)
-            }
+        ZStack(alignment: .topTrailing) {
+            // A List row containing more than one NavigationLink gets a single native
+            // disclosure accessory sized to the whole row, not each link — this hidden
+            // link + custom chevron below avoids that mismatched accessory entirely.
+            NavigationLink(destination: destination) { EmptyView() }
+                .opacity(0)
+            StatCell(title: title, value: value, valueSize: valueSize)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(AppTheme.neutral600)
+                .padding(AppTheme.space2)
         }
-        .buttonStyle(.plain)
     }
 
     private var allReceipts: [Invoice] {
