@@ -117,7 +117,7 @@ struct ReceiptsDashboardView: View {
                 HStack(spacing: 1) {
                     sourceCell(
                         title: store.gmailAgentIsRunning ? "Stop Agent" : "Scan Gmail",
-                        detail: store.gmailAgentIsRunning ? "Scanning now" : "Gmail + Telegram",
+                        detail: store.gmailAgentIsRunning ? "Scanning now" : "Gmail receipts",
                         icon: store.gmailAgentIsRunning ? "stop.circle" : "envelope.badge"
                     ) {
                         if store.gmailAgentIsRunning {
