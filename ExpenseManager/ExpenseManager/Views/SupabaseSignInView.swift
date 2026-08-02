@@ -9,54 +9,70 @@ struct SupabaseSignInView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("Email", text: $email)
-                        .textContentType(.username)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.emailAddress)
-                        .autocorrectionDisabled()
-
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
-                } header: {
-                    Text("Supabase Auth")
-                } footer: {
-                    Text("Optional. Use this only if you later switch from single-user anon policies to Auth-backed per-user RLS.")
-                }
-
-                if let errorMessage {
-                    Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+        VStack(spacing: 0) {
+            header
+            RuleLine()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: AppTheme.space4) {
+                    FlatField(label: "Email") {
+                        TextField("you@company.com", text: $email)
+                            .textContentType(.username)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.emailAddress)
+                            .autocorrectionDisabled()
                     }
-                }
+                    FlatField(label: "Password") {
+                        SecureField("••••••••", text: $password)
+                            .textContentType(.password)
+                    }
+                    Text("Optional. Use this only if you later switch from single-user anon policies to Auth-backed per-user RLS.")
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
 
-                Section {
+                    if let errorMessage {
+                        Text(errorMessage)
+                            .font(AppFont.subhead)
+                            .foregroundStyle(AppTheme.accent700)
+                            .padding(AppTheme.space3)
+                            .background(AppTheme.surface)
+                            .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
+                    }
+
                     Button {
                         Task { await signIn() }
                     } label: {
-                        HStack {
-                            if isSigningIn {
-                                ProgressView()
-                            }
-                            Text(isSigningIn ? "Signing in..." : "Sign In")
+                        if isSigningIn {
+                            ProgressView()
+                                .tint(AppTheme.bg)
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Text("Sign In")
                         }
                     }
+                    .buttonStyle(FlatPrimaryButtonStyle())
                     .disabled(isSigningIn || email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || password.isEmpty)
                 }
-            }
-            .navigationTitle("Optional Supabase Auth")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
+                .padding(AppTheme.space4)
             }
         }
+        .background(AppTheme.bg.ignoresSafeArea())
+    }
+
+    private var header: some View {
+        HStack {
+            Button("Cancel") { dismiss() }
+                .font(AppFont.headline)
+                .foregroundStyle(AppTheme.accent700)
+            Spacer()
+            Text("Supabase Auth")
+                .font(AppFont.title2)
+                .foregroundStyle(AppTheme.text)
+            Spacer()
+            Color.clear.frame(width: 56, height: 1)
+        }
+        .padding(.horizontal, AppTheme.space4)
+        .padding(.top, AppTheme.space6 + AppTheme.space2)
+        .padding(.bottom, AppTheme.space3)
     }
 
     private func signIn() async {
