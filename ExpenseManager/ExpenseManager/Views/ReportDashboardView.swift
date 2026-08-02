@@ -134,11 +134,46 @@ struct ReportDashboardView: View {
                 summaryGrid
                 SectionLabel(text: "View Report")
                 reportOptions
+                SectionLabel(text: "Receipt Management")
+                rejectedReceiptsRow
             }
             .padding(AppTheme.space4)
         }
         .background(AppTheme.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var rejectedReceiptsRow: some View {
+        RuledStack {
+            RuledRow {
+                NavigationLink {
+                    RejectedReceiptsView(store: store)
+                } label: {
+                    HStack(spacing: AppTheme.space3) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Rejected Receipts")
+                                .font(AppFont.headline)
+                                .foregroundStyle(AppTheme.text)
+                            Text("Review discarded receipts and restore them if needed.")
+                                .font(AppFont.subhead)
+                                .foregroundStyle(AppTheme.textMuted)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                        if !store.rejectedReceipts.isEmpty {
+                            TagView(text: "\(store.rejectedReceipts.count)", style: .outline)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(AppTheme.neutral600)
+                    }
+                    .padding(.vertical, AppTheme.space3)
+                    .padding(.horizontal, AppTheme.space3)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private var header: some View {

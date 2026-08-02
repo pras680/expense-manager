@@ -29,6 +29,7 @@ class ReceiptStore: ObservableObject {
     @Published var smsInboxFetchLog: String? = nil
     @Published var smsInboxPendingCount: Int? = nil
     @Published var smsInboxFailedCount: Int? = nil
+    @Published var rejectedReceipts: [RejectedReceipt] = []
     let supabaseService: SupabaseService
     private let paymentMappingService: PaymentMappingService
     private let currencyConversionService = CurrencyConversionService()
@@ -43,13 +44,24 @@ class ReceiptStore: ObservableObject {
     private let gmailLastDailyRunDateKey = "gmailLastDailyRunDate"
     private let reviewedReceiptFingerprintsKey = "reviewedReceiptFingerprints"
     private let receiptCorrectionRulesKey = "receiptCorrectionRules"
+    private let rejectedReceiptsKey = "rejectedReceipts"
     private let maximumReviewedReceiptFingerprints = 500
     private let maximumReceiptCorrectionRules = 120
+    private let maximumRejectedReceipts = 200
 
     struct PendingReceipt: Identifiable {
         let id: UUID
         var invoice: Invoice
         var imageData: Data?
+    }
+
+    /// A receipt the user explicitly discarded from the pending review sheet. Kept in full
+    /// (unlike `ReviewedReceiptFingerprint`, which only remembers a hash) so it can be viewed
+    /// and restored later from Reports.
+    struct RejectedReceipt: Codable, Identifiable {
+        let id: UUID
+        var invoice: Invoice
+        let rejectedAt: Date
     }
 
     struct ReviewedReceiptFingerprint: Codable, Hashable {
@@ -118,6 +130,7 @@ class ReceiptStore: ObservableObject {
         self.gmailLastScanDate = UserDefaults.standard.object(forKey: gmailLastScanDateKey) as? Date
         self.defaultCurrencyCode = UserDefaults.standard.string(forKey: defaultCurrencyCodeKey) ?? Invoice.defaultCurrency
         self.supabaseSession = nil
+        self.rejectedReceipts = Self.loadRejectedReceiptsFromDisk()
         self.gmailScanner.onProgress = { [weak self] message in
             Task { @MainActor in
                 AppSecurity.debugLog("Gmail agent progress updated.")
@@ -254,19 +267,21 @@ class ReceiptStore: ObservableObject {
     }
 
     var filteredInvoices: [Invoice] {
-        invoices.filter { invoice in
-            let matchesSearch = searchText.isEmpty || invoice.matches(searchText)
-            guard matchesSearch else { return false }
+        invoices
+            .filter { invoice in
+                let matchesSearch = searchText.isEmpty || invoice.matches(searchText)
+                guard matchesSearch else { return false }
 
-            switch selectedFilter {
-            case .all:
-                return true
-            case .last30Days:
-                return invoice.date.map { calendar.dateComponents([.day], from: $0, to: Date()).day ?? 999 < 30 } ?? false
-            case .noDate:
-                return invoice.date == nil
+                switch selectedFilter {
+                case .all:
+                    return true
+                case .last30Days:
+                    return invoice.date.map { calendar.dateComponents([.day], from: $0, to: Date()).day ?? 999 < 30 } ?? false
+                case .noDate:
+                    return invoice.date == nil
+                }
             }
-        }
+            .sorted { ($0.date ?? Date.distantPast) > ($1.date ?? Date.distantPast) }
     }
 
     var totalSpend: Decimal {
@@ -1114,6 +1129,42 @@ class ReceiptStore: ObservableObject {
         }
     }
 
+    private static func loadRejectedReceiptsFromDisk() -> [RejectedReceipt] {
+        guard let data = UserDefaults.standard.data(forKey: "rejectedReceipts") else {
+            return []
+        }
+        do {
+            return try JSONDecoder().decode([RejectedReceipt].self, from: data)
+        } catch {
+            AppSecurity.debugLog("Failed to read rejected receipts: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+            return []
+        }
+    }
+
+    private func persistRejectedReceipts() {
+        do {
+            let data = try JSONEncoder().encode(rejectedReceipts)
+            UserDefaults.standard.set(data, forKey: rejectedReceiptsKey)
+        } catch {
+            AppSecurity.debugLog("Failed to persist rejected receipts: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
+        }
+    }
+
+    /// Removes a receipt from the rejected list and re-queues it for pending review so its
+    /// fields can be checked/edited before it's approved and saved like any other receipt.
+    func restoreRejectedReceipt(_ rejected: RejectedReceipt) {
+        rejectedReceipts.removeAll { $0.id == rejected.id }
+        persistRejectedReceipts()
+        enqueuePendingReceipt(invoice: rejected.invoice, imageData: nil)
+        statusMessage = "Restored \(rejected.invoice.merchant ?? "receipt") for review."
+    }
+
+    /// Permanently removes a rejected receipt from the list without restoring it.
+    func deleteRejectedReceipt(_ rejected: RejectedReceipt) {
+        rejectedReceipts.removeAll { $0.id == rejected.id }
+        persistRejectedReceipts()
+    }
+
     private func reviewedRawTextHash(for rawText: String) -> String? {
         let normalized = normalizedReviewedRawText(rawText)
         guard !normalized.isEmpty else { return nil }
@@ -1815,7 +1866,12 @@ class ReceiptStore: ObservableObject {
     func discardPendingReceipt() {
         if let pendingReceipt {
             rememberReviewedReceipt(pendingReceipt.invoice, action: "rejected")
-            statusMessage = "Rejected receipt will be skipped in future scans."
+            rejectedReceipts.insert(RejectedReceipt(id: pendingReceipt.invoice.id, invoice: pendingReceipt.invoice, rejectedAt: Date()), at: 0)
+            if rejectedReceipts.count > maximumRejectedReceipts {
+                rejectedReceipts = Array(rejectedReceipts.prefix(maximumRejectedReceipts))
+            }
+            persistRejectedReceipts()
+            statusMessage = "Rejected receipt will be skipped in future scans. View it under Reports > Rejected Receipts."
         }
         pendingReceipt = nil
         presentNextPendingReceipt()
