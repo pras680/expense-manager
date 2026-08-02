@@ -39,7 +39,7 @@ struct MainTabView: View {
             }
             .tag(AppTab.tools)
         }
-        .tint(Color(red: 0.16, green: 0.36, blue: 0.92))
+        .tint(AppTheme.accent)
         .task {
             await store.refreshSupabaseSession()
             await store.loadReceipts()
@@ -81,176 +81,175 @@ private struct ToolsView: View {
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 18) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Scanner Lab", systemImage: "wand.and.stars")
-                        .font(.largeTitle.weight(.black))
-                    Text("Test OCR, scan receipts, import from Photos, and validate your Supabase save flow from one place.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: AppTheme.space4) {
+                VStack(alignment: .leading, spacing: AppTheme.space1) {
+                    Text("Tools")
+                        .font(AppFont.largeTitle)
+                        .foregroundStyle(AppTheme.text)
+                    Text("Scanning, imports, currency, and account settings.")
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(22)
-                .background(
-                    LinearGradient(colors: [Color.cyan.opacity(0.26), Color.indigo.opacity(0.18), Color.pink.opacity(0.14)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+                RuleLine()
 
-                if store.isProcessing || store.statusMessage != nil {
-                    HStack(spacing: 12) {
-                        if store.isProcessing {
-                            ProgressView()
+                SectionLabel(text: "Default Currency")
+                RuledStack {
+                    RuledRow {
+                        VStack(alignment: .leading, spacing: AppTheme.space2) {
+                            Picker("Default currency", selection: Binding(
+                                get: { store.defaultCurrencyCode },
+                                set: { store.setDefaultCurrency($0) }
+                            )) {
+                                ForEach(Invoice.commonCurrencies, id: \.self) { currency in
+                                    Text(currency).tag(currency)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(AppTheme.accent700)
+                            Text("Non-default receipt currencies are converted using the receipt date and stored with the exchange rate.")
+                                .font(AppFont.subhead)
+                                .foregroundStyle(AppTheme.textMuted)
                         }
-                        Text(store.statusMessage ?? "Ready")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.secondary)
-                        Spacer()
+                        .padding(.vertical, AppTheme.space3)
+                        .padding(.horizontal, AppTheme.space3)
                     }
-                    .padding()
-                    .background(.regularMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
 
-                currencySettingsCard
-
-                VStack(spacing: 14) {
-                    toolButton(title: "Scan with Camera", subtitle: "Capture a real receipt", icon: "camera.viewfinder", tint: .green) {
-                        store.showScanner = true
-                    }
-                    toolButton(title: "Import from Photos", subtitle: "Use an existing receipt image", icon: "photo.on.rectangle.angled", tint: .blue) {
-                        store.showPhotoPicker = true
-                    }
-                    toolButton(title: "Run Sample OCR Trial", subtitle: "Generate a sample receipt image and extract text", icon: "doc.text.viewfinder", tint: .purple) {
-                        Task { await store.runSampleReceiptTrial() }
-                    }
-                    toolButton(title: store.gmailAgentTitle, subtitle: store.gmailAgentSubtitle, icon: "envelope.badge.shield.half.filled", tint: store.gmailAgentIsRunning ? .red : .blue) {
-                        store.toggleGmailAgent()
-                    }
-                    Toggle(isOn: Binding(
-                        get: { store.gmailDailyAgentEnabled },
-                        set: { store.setGmailDailyAgentEnabled($0) }
-                    )) {
-                        Label("Daily Gmail + Telegram Agent", systemImage: "calendar.badge.clock")
-                            .font(.headline)
-                        Text(store.gmailScheduleSubtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding()
-                    .background(Color(.systemBackground).opacity(0.92))
-                    .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-                    toolButton(title: store.supabaseAuthTitle, subtitle: store.supabaseAuthSubtitle, icon: store.supabaseSession == nil ? "lock.open.display" : "person.crop.circle.badge.checkmark", tint: store.supabaseSession == nil ? .blue : .green) {
-                        if store.supabaseSession == nil {
-                            store.showSupabaseSignIn = true
-                        } else {
-                            Task { await store.signOutFromSupabase() }
+                SectionLabel(text: "Import Receipts")
+                RuledStack {
+                    RuledRow {
+                        toolRow(title: "Scan with Camera", icon: "camera.viewfinder") {
+                            store.showScanner = true
                         }
                     }
-                    toolButton(title: "Reload Supabase Receipts", subtitle: "Refresh saved receipt rows", icon: "arrow.clockwise.circle.fill", tint: .orange) {
-                        Task { await store.loadReceipts() }
+                    RuledRow {
+                        toolRow(title: "Import from Photos", icon: "photo.on.rectangle") {
+                            store.showPhotoPicker = true
+                        }
                     }
-                    toolButton(title: "View Spending Report", subtitle: "Open totals, weekly trend, and insights", icon: "chart.xyaxis.line", tint: .pink) {
-                        onShowReport()
+                    RuledRow {
+                        toolRow(title: "Run Sample OCR Trial", icon: "doc.text.viewfinder") {
+                            Task { await store.runSampleReceiptTrial() }
+                        }
+                    }
+                    RuledRow {
+                        toolRow(title: store.gmailAgentTitle, subtitle: store.gmailAgentSubtitle, icon: "envelope.badge") {
+                            store.toggleGmailAgent()
+                        }
+                    }
+                    RuledRow { dailyAgentRow }
+                }
+
+                SectionLabel(text: "Account")
+                RuledStack {
+                    RuledRow {
+                        toolRow(title: store.supabaseAuthTitle, subtitle: store.supabaseAuthSubtitle, icon: store.supabaseSession == nil ? "lock" : "person.crop.circle.badge.checkmark") {
+                            if store.supabaseSession == nil {
+                                store.showSupabaseSignIn = true
+                            } else {
+                                Task { await store.signOutFromSupabase() }
+                            }
+                        }
+                    }
+                    RuledRow {
+                        toolRow(title: "Reload Supabase Receipts", icon: "arrow.clockwise") {
+                            Task { await store.loadReceipts() }
+                        }
+                    }
+                    RuledRow {
+                        toolRow(title: "View Spending Report", icon: "chart.xyaxis.line", action: onShowReport)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Backend checklist")
-                        .font(.headline)
-                    checklistRow("Edge Function deployed", detail: "/functions/v1/parse-receipt")
-                    checklistRow("Receipts table policies", detail: "Allow anon insert/select or add app auth")
-                    checklistRow("Storage bucket policy", detail: "Allow uploads to receipt-documents")
-                    checklistRow("Google OAuth configured", detail: "iOS client ID + Gmail read-only scope")
+                SectionLabel(text: "Backend Checklist")
+                RuledStack {
+                    RuledRow { checklistRow("Edge Function deployed", detail: "/functions/v1/parse-receipt") }
+                    RuledRow { checklistRow("Receipts table policies", detail: "Allow anon insert/select or add app auth") }
+                    RuledRow { checklistRow("Storage bucket policy", detail: "Allow uploads to receipt-documents") }
+                    RuledRow { checklistRow("Google OAuth configured", detail: "iOS client ID + Gmail read-only scope") }
                 }
-                .padding()
-                .background(Color(.systemBackground).opacity(0.92))
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+
+                HStack(spacing: AppTheme.space2) {
+                    if store.isProcessing {
+                        ProgressView()
+                    }
+                    Text(store.statusMessage ?? "Ready")
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
+                }
+                .padding(.top, AppTheme.space1)
             }
-            .padding()
+            .padding(AppTheme.space4)
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
-        .navigationTitle("Tools")
-        .navigationBarTitleDisplayMode(.inline)
+        .background(AppTheme.bg.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
     }
 
-    private var currencySettingsCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: "dollarsign.arrow.circlepath")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 48, height: 48)
-                    .background(Color.teal.gradient)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Default Currency")
-                        .font(.headline)
-                    Text("Reports use converted \(store.defaultCurrencyCode) amounts.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
+    private var dailyAgentRow: some View {
+        Toggle(isOn: Binding(
+            get: { store.gmailDailyAgentEnabled },
+            set: { store.setGmailDailyAgentEnabled($0) }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Daily Gmail + Telegram Agent")
+                    .font(AppFont.headline)
+                    .foregroundStyle(AppTheme.text)
+                Text(store.gmailScheduleSubtitle)
+                    .font(AppFont.subhead)
+                    .foregroundStyle(AppTheme.textMuted)
             }
-
-            Picker("Default currency", selection: Binding(
-                get: { store.defaultCurrencyCode },
-                set: { store.setDefaultCurrency($0) }
-            )) {
-                ForEach(Invoice.commonCurrencies, id: \.self) { currency in
-                    Text(currency).tag(currency)
-                }
-            }
-            .pickerStyle(.menu)
-
-            Text("Non-default receipt currencies are converted using the receipt date and stored with the exchange rate.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
-        .padding()
-        .background(Color(.systemBackground).opacity(0.92))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .tint(AppTheme.accent)
+        .padding(.vertical, AppTheme.space3)
+        .padding(.horizontal, AppTheme.space3)
     }
 
-    private func toolButton(title: String, subtitle: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
+    private func toolRow(title: String, subtitle: String? = nil, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 14) {
+            HStack(spacing: AppTheme.space3) {
                 Image(systemName: icon)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 50, height: 50)
-                    .background(tint.gradient)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                VStack(alignment: .leading, spacing: 4) {
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent700)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(AppFont.headline)
+                        .foregroundStyle(AppTheme.text)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(AppFont.subhead)
+                            .foregroundStyle(AppTheme.textMuted)
+                    }
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .foregroundStyle(.tertiary)
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(AppTheme.neutral600)
             }
-            .padding()
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .padding(.vertical, AppTheme.space3)
+            .padding(.horizontal, AppTheme.space3)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
     private func checklistRow(_ title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "checkmark.seal.fill")
-                .foregroundStyle(.green)
+        HStack(alignment: .top, spacing: AppTheme.space3) {
+            Image(systemName: "checkmark")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(AppTheme.accent700)
+                .padding(.top, 2)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(AppFont.headline)
+                    .foregroundStyle(AppTheme.text)
                 Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(AppFont.subhead)
+                    .foregroundStyle(AppTheme.textMuted)
             }
             Spacer()
         }
+        .padding(.vertical, AppTheme.space3)
+        .padding(.horizontal, AppTheme.space3)
     }
 }

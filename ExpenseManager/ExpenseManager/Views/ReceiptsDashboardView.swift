@@ -1,27 +1,5 @@
 import SwiftUI
 
-private enum MellowPalette {
-    static let backgroundBase = Color(red: 0.97, green: 0.98, blue: 1.00)
-    static let warmGlow = Color(red: 1.00, green: 0.74, blue: 0.46)
-    static let sageGlow = Color(red: 0.38, green: 0.82, blue: 0.68)
-    static let lavenderGlow = Color(red: 0.59, green: 0.50, blue: 0.94)
-    static let card = Color(red: 1.00, green: 1.00, blue: 0.98)
-    static let cardSoft = Color(red: 0.91, green: 0.95, blue: 1.00)
-    static let text = Color(red: 0.12, green: 0.16, blue: 0.25)
-    static let secondaryText = Color(red: 0.39, green: 0.45, blue: 0.56)
-    static let sage = Color(red: 0.10, green: 0.66, blue: 0.52)
-    static let dustyBlue = Color(red: 0.16, green: 0.49, blue: 0.86)
-    static let mauve = Color(red: 0.52, green: 0.36, blue: 0.86)
-    static let clay = Color(red: 0.91, green: 0.39, blue: 0.25)
-    static let cocoa = Color(red: 0.20, green: 0.24, blue: 0.34)
-    static let softBorder = Color(red: 0.78, green: 0.84, blue: 0.93)
-    static let accountingBackground = Color(red: 0.95, green: 0.97, blue: 0.98)
-    static let accountingCard = Color(red: 1.00, green: 1.00, blue: 1.00)
-    static let accountingInk = Color(red: 0.08, green: 0.13, blue: 0.20)
-    static let accountingMuted = Color(red: 0.36, green: 0.43, blue: 0.52)
-    static let accountingNavy = Color(red: 0.08, green: 0.24, blue: 0.40)
-}
-
 struct ReceiptsDashboardView: View {
     @ObservedObject var store: ReceiptStore
     let onShowReport: () -> Void
@@ -32,37 +10,19 @@ struct ReceiptsDashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
-                    heroSection
-                    actionRail
-                    metricsStrip
-                    statusBanner
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+            List {
+                headerSection
+                quickActionsSection
+                sourceImportSection
+                statsSection
+                searchAndFiltersSection
+                receiptsSection
             }
-            .background(appBackground)
-            .navigationTitle("Bill Skills")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        store.showScanner = true
-                    } label: {
-                        Image(systemName: "camera.fill")
-                            .font(.headline)
-                            .foregroundStyle(MellowPalette.cocoa)
-                            .frame(width: 38, height: 38)
-                            .background(MellowPalette.card.opacity(0.92))
-                            .overlay(Circle().stroke(MellowPalette.softBorder.opacity(0.34), lineWidth: 1))
-                            .clipShape(Circle())
-                            .shadow(color: MellowPalette.cocoa.opacity(0.08), radius: 8, y: 4)
-                    }
-                    .accessibilityLabel("Scan receipt")
-                }
-            }
+            .listStyle(.plain)
+            .listSectionSpacing(.compact)
+            .scrollContentBackground(.hidden)
+            .background(AppTheme.bg)
+            .toolbar(.hidden, for: .navigationBar)
             .alert("Delete receipt?", isPresented: $showingDeleteConfirmation, actions: {
                 Button("Delete", role: .destructive) {
                     guard let invoice = activeInvoice else { return }
@@ -87,394 +47,219 @@ struct ReceiptsDashboardView: View {
         }
     }
 
-    private var appBackground: some View {
-        ZStack {
-            MellowPalette.backgroundBase
-            LinearGradient(colors: [MellowPalette.warmGlow.opacity(0.13), MellowPalette.sageGlow.opacity(0.11), MellowPalette.lavenderGlow.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    // MARK: Header
+
+    private var headerSection: some View {
+        Section {
+            VStack(spacing: AppTheme.space4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Bill Skills")
+                        .font(AppFont.largeTitle)
+                        .foregroundStyle(AppTheme.text)
+                    Spacer()
+                    TagView(text: store.defaultCurrencyCode, style: .outline)
+                }
+                RuleLine()
+            }
+            .padding(.top, AppTheme.space3)
+            .plainRow()
         }
-        .ignoresSafeArea()
     }
 
-    private var heroSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 14) {
-                Image(systemName: "building.columns.fill")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(MellowPalette.cocoa)
-                    .frame(width: 54, height: 54)
-                    .background(MellowPalette.card.opacity(0.74))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 17, style: .continuous)
-                            .stroke(MellowPalette.softBorder.opacity(0.30), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 17, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Bill Skills")
-                        .font(.system(size: 32, weight: .bold, design: .serif))
-                        .foregroundStyle(MellowPalette.text)
+    // MARK: Quick actions
+
+    private var quickActionsSection: some View {
+        Section {
+            HStack(spacing: 1) {
+                actionCell(title: "Scan", icon: "camera.viewfinder") { store.showScanner = true }
+                actionCell(title: "Import", icon: "photo.on.rectangle") { store.showPhotoPicker = true }
+                actionCell(title: "Report", icon: "chart.line.uptrend.xyaxis") { onShowReport() }
+                actionCell(title: "Manage", icon: "square.and.pencil", action: manage)
+            }
+            .background(AppTheme.divider)
+            .padding(.vertical, AppTheme.space3)
+            .plainRow()
+        }
+    }
+
+    private func manage() {
+        if let first = store.recentInvoices.first {
+            store.editingInvoice = first
+        } else {
+            searchFocused = true
+            store.statusMessage = "Scan or import a receipt first, then Manage opens editing."
+        }
+    }
+
+    private func actionCell(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: AppTheme.space2) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent700)
+                Text(title)
+                    .font(AppFont.caption)
+                    .foregroundStyle(AppTheme.text)
+            }
+            .padding(.vertical, AppTheme.space3)
+            .padding(.horizontal, AppTheme.space2 + 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.surface)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Gmail + SMS import sources
+
+    private var sourceImportSection: some View {
+        Section {
+            VStack(spacing: AppTheme.space3) {
+                HStack(spacing: 1) {
+                    sourceCell(
+                        title: store.gmailAgentIsRunning ? "Stop Agent" : "Scan Gmail",
+                        detail: store.gmailAgentIsRunning ? "Scanning now" : "Gmail + Telegram",
+                        icon: store.gmailAgentIsRunning ? "stop.circle" : "envelope.badge"
+                    ) {
+                        if store.gmailAgentIsRunning {
+                            store.toggleGmailAgent()
+                        } else {
+                            store.startManualGmailScanSinceLastCheck()
+                        }
+                    }
+                    sourceCell(title: "Scan SMS", detail: "Paste bank alert", icon: "message.badge") {
+                        showingSMSImport = true
+                    }
+                }
+                .background(AppTheme.divider)
+
+                dailyAgentRow
+            }
+            .padding(.vertical, AppTheme.space2)
+            .plainRow()
+        }
+    }
+
+    private func sourceCell(title: String, detail: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: AppTheme.space2 + 2) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(AppTheme.accent700)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(AppFont.headline)
+                        .foregroundStyle(AppTheme.text)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    Text("Expense & Receipt Manager")
-                        .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                        .foregroundStyle(MellowPalette.secondaryText)
+                        .minimumScaleFactor(0.8)
+                    Text(detail)
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
-                Spacer(minLength: 8)
-                Label(store.defaultCurrencyCode, systemImage: "dollarsign.circle")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(MellowPalette.cocoa)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(MellowPalette.card.opacity(0.60))
-                    .overlay(Capsule().stroke(MellowPalette.softBorder.opacity(0.30), lineWidth: 1))
-                    .clipShape(Capsule())
-            }
-
-            Divider()
-                .overlay(MellowPalette.softBorder.opacity(0.35))
-
-            Text("Scan, review, and track your spending with clarity and confidence.")
-                .font(.system(.subheadline, design: .rounded).weight(.medium))
-                .foregroundStyle(MellowPalette.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(18)
-        .background(
-            LinearGradient(colors: [MellowPalette.warmGlow.opacity(0.34), MellowPalette.lavenderGlow.opacity(0.30), MellowPalette.cardSoft.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .stroke(MellowPalette.card.opacity(0.66), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .shadow(color: MellowPalette.cocoa.opacity(0.08), radius: 12, x: 0, y: 6)
-    }
-
-    private var statusBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: store.isProcessing ? "hourglass" : "checkmark.seal.fill")
-                .font(.subheadline)
-                .foregroundStyle(store.isProcessing ? MellowPalette.clay : MellowPalette.sage)
-            if store.isProcessing {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(MellowPalette.clay)
-            }
-            Text(store.statusMessage ?? "Ready")
-                .font(.system(.caption, design: .rounded).weight(.medium))
-                .foregroundStyle(MellowPalette.secondaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.78)
-            Spacer()
-        }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 10)
-        .background(MellowPalette.card.opacity(0.70))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(MellowPalette.softBorder.opacity(0.24), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-    }
-
-    private var actionRail: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                actionTile(title: "Scan", icon: "camera.viewfinder", tint: MellowPalette.sage) {
-                    store.showScanner = true
-                }
-                actionTile(title: "Import", icon: "photo.on.rectangle.angled", tint: MellowPalette.dustyBlue) {
-                    store.showPhotoPicker = true
-                }
-                actionTile(title: "Report", icon: "chart.line.uptrend.xyaxis", tint: MellowPalette.mauve) {
-                    onShowReport()
-                }
-                actionTile(title: "Manage", icon: "square.and.pencil", tint: MellowPalette.clay) {
-                    if let first = store.recentInvoices.first {
-                        store.editingInvoice = first
-                    } else {
-                        store.statusMessage = "Scan or import a receipt first, then Manage opens editing."
-                    }
-                }
-            }
-            sourceImportControls
-        }
-    }
-
-    private func actionTile(title: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 38, height: 38)
-                    .background(tint.opacity(0.13))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(tint.opacity(0.14), lineWidth: 1)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(MellowPalette.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                    .allowsTightening(true)
-            }
-            .padding(.vertical, 11)
-            .padding(.horizontal, 5)
-            .frame(maxWidth: .infinity, minHeight: 74)
-            .background(
-                LinearGradient(colors: [tint.opacity(0.20), MellowPalette.card.opacity(0.86)], startPoint: .topLeading, endPoint: .bottomTrailing)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(tint.opacity(0.18), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .shadow(color: tint.opacity(0.10), radius: 8, y: 4)
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var sourceImportControls: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                sourceButton(
-                    title: store.gmailAgentIsRunning ? "Stop Agent" : "Scan Gmail",
-                    detail: store.gmailAgentIsRunning ? "Scanning now" : "Gmail only",
-                    icon: store.gmailAgentIsRunning ? "stop.circle.fill" : "envelope.badge.shield.half.filled",
-                    tint: store.gmailAgentIsRunning ? MellowPalette.clay : MellowPalette.dustyBlue
-                ) {
-                    if store.gmailAgentIsRunning {
-                        store.toggleGmailAgent()
-                    } else {
-                        store.startManualGmailScanSinceLastCheck()
-                    }
-                }
-
-                sourceButton(
-                    title: "Scan SMS",
-                    detail: "Paste bank alert",
-                    icon: "message.badge.waveform.fill",
-                    tint: MellowPalette.mauve
-                ) {
-                    showingSMSImport = true
-                }
-            }
-
-            Toggle(isOn: Binding(
-                get: { store.gmailDailyAgentEnabled },
-                set: { store.setGmailDailyAgentEnabled($0) }
-            )) {
-                HStack(spacing: 10) {
-                    Image(systemName: store.gmailDailyAgentEnabled ? "antenna.radiowaves.left.and.right.circle.fill" : "power.circle")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(store.gmailDailyAgentEnabled ? MellowPalette.sage : MellowPalette.secondaryText)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(store.gmailAgentLiveStatusTitle)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(store.gmailDailyAgentEnabled ? MellowPalette.sage : MellowPalette.text)
-                        Text("Last scan: \(store.gmailLastScanInfo)")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(MellowPalette.secondaryText)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                    }
-                }
-            }
-            .toggleStyle(.switch)
-            .tint(MellowPalette.sage)
-        }
-        .padding(13)
-        .background(
-            LinearGradient(colors: [MellowPalette.card.opacity(0.94), MellowPalette.cardSoft.opacity(0.80)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(MellowPalette.dustyBlue.opacity(0.16), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .shadow(color: MellowPalette.dustyBlue.opacity(0.08), radius: 9, y: 4)
-    }
-
-    private func sourceButton(title: String, detail: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(tint.gradient)
-                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MellowPalette.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                    Text(detail)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(MellowPalette.secondaryText)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.78)
-                }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 11)
-            .padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-            .background(tint.opacity(0.10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(tint.opacity(0.14), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.vertical, AppTheme.space3)
+            .padding(.horizontal, AppTheme.space3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.surface)
         }
         .buttonStyle(.plain)
     }
 
-    private func agentStatusPill(title: String, detail: String, icon: String, tint: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(tint)
-                .frame(width: 24, height: 24)
-                .background(tint.opacity(0.11))
-                .clipShape(Circle())
+    private var dailyAgentRow: some View {
+        Toggle(isOn: Binding(
+            get: { store.gmailDailyAgentEnabled },
+            set: { store.setGmailDailyAgentEnabled($0) }
+        )) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(MellowPalette.text)
+                Text(store.gmailAgentLiveStatusTitle)
+                    .font(AppFont.headline)
+                    .foregroundStyle(AppTheme.text)
+                Text("Last scan: \(store.gmailLastScanInfo)")
+                    .font(AppFont.subhead)
+                    .foregroundStyle(AppTheme.textMuted)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-                Text(detail)
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(MellowPalette.secondaryText)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.78)
-            }
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(MellowPalette.cardSoft.opacity(0.42))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(tint.opacity(0.12), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private var metricsStrip: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Financial Snapshot")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(MellowPalette.text)
-            metricLink(
-                title: "Total Spend",
-                value: store.totalSpend.formatted(.currency(code: store.defaultCurrencyCode)),
-                icon: "creditcard.fill",
-                tint: MellowPalette.dustyBlue,
-                destinationTitle: "Total Spend",
-                destinationSubtitle: "All saved receipts",
-                amount: store.totalSpend,
-                receipts: allReceipts,
-                prominent: true
-            )
-            HStack(spacing: 12) {
-                metricLink(
-                    title: "This Month",
-                    value: store.monthlySpend.formatted(.currency(code: store.defaultCurrencyCode)),
-                    icon: "calendar.badge.clock",
-                    tint: MellowPalette.mauve,
-                    destinationTitle: "This Month",
-                    destinationSubtitle: "Current calendar month receipts",
-                    amount: store.monthlySpend,
-                    receipts: currentMonthReceipts
-                )
-                metricLink(
-                    title: "Receipts",
-                    value: "\(store.receiptCount)",
-                    icon: "tray.full.fill",
-                    tint: MellowPalette.clay,
-                    destinationTitle: "All Receipts",
-                    destinationSubtitle: "Every saved receipt",
-                    amount: store.totalSpend,
-                    receipts: allReceipts
-                )
+                    .minimumScaleFactor(0.8)
             }
         }
-        .padding(16)
-        .background(MellowPalette.card.opacity(0.84))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(MellowPalette.softBorder.opacity(0.30), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .tint(AppTheme.accent)
+        .padding(.vertical, AppTheme.space3)
+        .padding(.horizontal, AppTheme.space3)
+        .background(AppTheme.surface)
+        .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
     }
 
-    private func metricLink(title: String, value: String, icon: String, tint: Color, destinationTitle: String, destinationSubtitle: String, amount: Decimal, receipts: [Invoice], prominent: Bool = false) -> some View {
-        NavigationLink {
-            DashboardReceiptDrillDownView(
-                store: store,
-                title: destinationTitle,
-                subtitle: destinationSubtitle,
-                amount: amount,
-                receipts: receipts,
-                tint: tint,
-                onEdit: { invoice in store.editingInvoice = invoice },
-                onDelete: { invoice in
-                    activeInvoice = invoice
-                    showingDeleteConfirmation = true
+    // MARK: Stats
+
+    private var statsSection: some View {
+        Section {
+            VStack(spacing: 1) {
+                statLink(title: "Total Spend", value: store.totalSpend.formatted(.currency(code: store.defaultCurrencyCode)), valueSize: 30) {
+                    DashboardReceiptDrillDownView(
+                        store: store,
+                        title: "Total Spend",
+                        subtitle: "All saved receipts",
+                        amount: store.totalSpend,
+                        receipts: allReceipts,
+                        onEdit: { invoice in store.editingInvoice = invoice },
+                        onDelete: { invoice in
+                            activeInvoice = invoice
+                            showingDeleteConfirmation = true
+                        }
+                    )
                 }
-            )
+                HStack(spacing: 1) {
+                    statLink(title: "This Month", value: store.monthlySpend.formatted(.currency(code: store.defaultCurrencyCode))) {
+                        DashboardReceiptDrillDownView(
+                            store: store,
+                            title: "This Month",
+                            subtitle: "Current calendar month receipts",
+                            amount: store.monthlySpend,
+                            receipts: currentMonthReceipts,
+                            onEdit: { invoice in store.editingInvoice = invoice },
+                            onDelete: { invoice in
+                                activeInvoice = invoice
+                                showingDeleteConfirmation = true
+                            }
+                        )
+                    }
+                    statLink(title: "Receipts", value: "\(store.receiptCount)") {
+                        DashboardReceiptDrillDownView(
+                            store: store,
+                            title: "All Receipts",
+                            subtitle: "Every saved receipt",
+                            amount: store.totalSpend,
+                            receipts: allReceipts,
+                            onEdit: { invoice in store.editingInvoice = invoice },
+                            onDelete: { invoice in
+                                activeInvoice = invoice
+                                showingDeleteConfirmation = true
+                            }
+                        )
+                    }
+                }
+            }
+            .background(AppTheme.divider)
+            .padding(.vertical, AppTheme.space3)
+            .plainRow()
+        }
+    }
+
+    private func statLink<Destination: View>(title: String, value: String, valueSize: CGFloat = 18, @ViewBuilder destination: () -> Destination) -> some View {
+        NavigationLink {
+            destination()
         } label: {
-            metricPill(title: title, value: value, icon: icon, tint: tint, prominent: prominent)
+            ZStack(alignment: .topTrailing) {
+                StatCell(title: title, value: value, valueSize: valueSize)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(AppTheme.neutral600)
+                    .padding(AppTheme.space2)
+            }
         }
         .buttonStyle(.plain)
-    }
-
-    private func metricPill(title: String, value: String, icon: String, tint: Color, prominent: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: prominent ? 14 : 10) {
-            HStack {
-                Image(systemName: icon)
-                    .font((prominent ? Font.title3 : Font.subheadline).weight(.bold))
-                    .foregroundStyle(.white)
-                    .frame(width: prominent ? 42 : 34, height: prominent ? 42 : 34)
-                    .background(tint.gradient)
-                    .clipShape(RoundedRectangle(cornerRadius: prominent ? 14 : 11, style: .continuous))
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(tint.opacity(0.85))
-            }
-            Text(value)
-                .font(.system(size: prominent ? 34 : 25, weight: .bold, design: .rounded))
-                .foregroundStyle(MellowPalette.text)
-                .minimumScaleFactor(0.45)
-                .lineLimit(1)
-                .monospacedDigit()
-            Text(title)
-                .font(.system(size: prominent ? 15 : 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(MellowPalette.secondaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .frame(maxWidth: .infinity, minHeight: prominent ? 154 : 126, alignment: .leading)
-        .padding(prominent ? 16 : 13)
-        .background(
-            LinearGradient(colors: [tint.opacity(prominent ? 0.18 : 0.14), MellowPalette.accountingCard.opacity(0.98)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: prominent ? 22 : 20, style: .continuous)
-                .stroke(tint.opacity(0.20), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: prominent ? 22 : 20, style: .continuous))
-        .shadow(color: tint.opacity(0.09), radius: 8, y: 4)
     }
 
     private var allReceipts: [Invoice] {
@@ -490,132 +275,183 @@ struct ReceiptsDashboardView: View {
             .sorted { ($0.date ?? Date.distantPast) > ($1.date ?? Date.distantPast) }
     }
 
-    private var searchAndFilters: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(MellowPalette.secondaryText)
-                TextField("Search merchant, amount, or date", text: $store.searchText)
-                    .focused($searchFocused)
-                    .textInputAutocapitalization(.never)
-                    .foregroundStyle(MellowPalette.text)
-                if !store.searchText.isEmpty {
-                    Button {
-                        store.searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(MellowPalette.secondaryText.opacity(0.7))
-                    }
-                }
-            }
-            .padding(14)
-            .background(MellowPalette.card.opacity(0.70))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(MellowPalette.softBorder.opacity(0.22), lineWidth: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+    // MARK: Search + filters
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    ForEach(ReceiptStore.ReceiptFilter.allCases) { filter in
+    private var searchAndFiltersSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: AppTheme.space3) {
+                HStack(spacing: AppTheme.space2) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(AppTheme.neutral700)
+                    TextField("Search merchant, amount, or date", text: $store.searchText)
+                        .focused($searchFocused)
+                        .font(AppFont.body15)
+                        .textInputAutocapitalization(.never)
+                    if !store.searchText.isEmpty {
                         Button {
-                            store.selectedFilter = filter
+                            store.searchText = ""
                         } label: {
-                            Text(filter.rawValue)
-                                .font(.caption.weight(.semibold))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 9)
-                                .background(store.selectedFilter == filter ? MellowPalette.clay.opacity(0.16).gradient : MellowPalette.card.opacity(0.68).gradient)
-                                .foregroundStyle(store.selectedFilter == filter ? MellowPalette.cocoa : MellowPalette.secondaryText)
-                                .clipShape(Capsule())
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(AppTheme.neutral600)
                         }
                         .buttonStyle(.plain)
                     }
                 }
-            }
-        }
-    }
+                .padding(.horizontal, AppTheme.space3)
+                .padding(.vertical, AppTheme.space2 + 2)
+                .background(AppTheme.surface)
+                .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
 
-    private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Receipts Inbox")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(MellowPalette.text)
-                    Text("View, edit, and delete saved receipts.")
-                        .font(.caption)
-                        .foregroundStyle(MellowPalette.secondaryText)
-                }
-                Spacer()
-                if store.pendingReceipt != nil {
-                    Label("Review", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(MellowPalette.clay.opacity(0.13))
-                        .foregroundStyle(MellowPalette.clay)
-                        .clipShape(Capsule())
-                }
-            }
-
-            if store.filteredInvoices.isEmpty {
-                emptyState
-            } else {
-                VStack(spacing: 12) {
-                    ForEach(store.filteredInvoices) { invoice in
-                        ReceiptRow(invoice: invoice,
-                                   defaultCurrencyCode: store.defaultCurrencyCode,
-                                   onEdit: { store.editingInvoice = invoice },
-                                   onDelete: {
-                                       activeInvoice = invoice
-                                       showingDeleteConfirmation = true
-                                   })
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: AppTheme.space2) {
+                        ForEach(ReceiptStore.ReceiptFilter.allCases) { filter in
+                            Button {
+                                store.selectedFilter = filter
+                            } label: {
+                                TagView(text: filter.rawValue, style: store.selectedFilter == filter ? .solid : .outline)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
             }
+            .padding(.vertical, AppTheme.space2)
+            .plainRow()
         }
-        .padding()
-        .background(MellowPalette.card.opacity(0.66))
-        .overlay(
-            RoundedRectangle(cornerRadius: 30, style: .continuous)
-                .stroke(MellowPalette.softBorder.opacity(0.20), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .shadow(color: MellowPalette.cocoa.opacity(0.045), radius: 11, y: 7)
+    }
+
+    // MARK: Receipts inbox
+
+    private var receiptsSection: some View {
+        Section {
+            HStack {
+                SectionLabel(text: "Receipts Inbox")
+                Spacer()
+                if store.pendingReceipt != nil {
+                    TagView(text: "Review", style: .solid)
+                }
+            }
+            .padding(.top, AppTheme.space2)
+            .padding(.bottom, AppTheme.space1)
+            .plainRow()
+
+            if store.filteredInvoices.isEmpty {
+                emptyState
+                    .plainRow()
+            } else {
+                ForEach(store.filteredInvoices) { invoice in
+                    receiptRow(invoice)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                activeInvoice = invoice
+                                showingDeleteConfirmation = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            Button {
+                                store.editingInvoice = invoice
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(AppTheme.accent700)
+                        }
+                        .plainRow()
+                }
+            }
+        }
+    }
+
+    private func receiptRow(_ invoice: Invoice) -> some View {
+        NavigationLink {
+            DashboardReceiptDetailView(
+                invoice: invoice,
+                defaultCurrencyCode: store.defaultCurrencyCode,
+                onEdit: { store.editingInvoice = invoice },
+                onDelete: {
+                    activeInvoice = invoice
+                    showingDeleteConfirmation = true
+                }
+            )
+        } label: {
+            HStack(spacing: AppTheme.space3) {
+                Text(initial(for: invoice))
+                    .font(AppFont.headline)
+                    .foregroundStyle(AppTheme.text)
+                    .frame(width: 38, height: 38)
+                    .background(AppTheme.surface)
+                    .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(invoice.merchant ?? "Unknown merchant")
+                        .font(AppFont.headline)
+                        .foregroundStyle(AppTheme.text)
+                        .lineLimit(1)
+                    Text(rowSubtitle(for: invoice))
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: AppTheme.space2)
+
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(invoice.reportingTotal(defaultCurrencyCode: store.defaultCurrencyCode).map { $0.formatted(.currency(code: store.defaultCurrencyCode)) } ?? "Pending")
+                        .font(AppFont.title2)
+                        .foregroundStyle(AppTheme.text)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    if let original = invoice.displayReceiptAmount {
+                        Text(original.formatted(.currency(code: invoice.displayReceiptCurrency)))
+                            .font(AppFont.caption)
+                            .foregroundStyle(AppTheme.textMuted)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .padding(.vertical, AppTheme.space3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppTheme.surface)
+            .overlay(alignment: .bottom) { RuleLine().opacity(0.5) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func initial(for invoice: Invoice) -> String {
+        String((invoice.merchant ?? "Receipt").prefix(1)).uppercased()
+    }
+
+    private func rowSubtitle(for invoice: Invoice) -> String {
+        let dateLabel = invoice.date.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .none) } ?? "No date"
+        let category = invoice.category?.nilIfEmpty ?? "Miscellaneous"
+        return "\(dateLabel) · \(category)"
     }
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "doc.text.viewfinder")
-                .font(.system(size: 42, weight: .semibold))
-                .foregroundStyle(MellowPalette.dustyBlue)
-                .frame(width: 78, height: 78)
-                .background(MellowPalette.dustyBlue.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        VStack(spacing: AppTheme.space3) {
             Text(store.searchText.isEmpty ? "No receipts yet" : "No matching receipts")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(MellowPalette.text)
+                .font(AppFont.headline)
+                .foregroundStyle(AppTheme.text)
             Text(store.searchText.isEmpty ? "Tap Scan or Import to extract receipt text, then approve the review sheet to save it." : "Try another search term or switch the filter back to All.")
-                .font(.subheadline)
-                .foregroundStyle(MellowPalette.secondaryText)
+                .font(AppFont.subhead)
+                .foregroundStyle(AppTheme.textMuted)
                 .multilineTextAlignment(.center)
-            HStack(spacing: 12) {
+            HStack(spacing: AppTheme.space3) {
                 Button("Scan") { store.showScanner = true }
-                    .buttonStyle(.borderedProminent)
-                    .tint(MellowPalette.sage)
+                    .buttonStyle(FlatPrimaryButtonStyle(fullWidth: false))
                 Button("Sample Trial") { Task { await store.runSampleReceiptTrial() } }
-                    .buttonStyle(.bordered)
-                    .tint(MellowPalette.cocoa)
+                    .buttonStyle(FlatSecondaryButtonStyle(fullWidth: false))
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 220)
-        .padding()
-        .background(MellowPalette.card.opacity(0.66))
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppTheme.space6)
+        .padding(.horizontal, AppTheme.space4)
+        .background(AppTheme.surface)
+        .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
     }
 }
+
+// MARK: - Drill-down (Total Spend / This Month / Receipts)
 
 private struct DashboardReceiptDrillDownView: View {
     @ObservedObject var store: ReceiptStore
@@ -623,223 +459,149 @@ private struct DashboardReceiptDrillDownView: View {
     let subtitle: String
     let amount: Decimal
     let receipts: [Invoice]
-    let tint: Color
     let onEdit: (Invoice) -> Void
     let onDelete: (Invoice) -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                header
+            VStack(alignment: .leading, spacing: AppTheme.space4) {
+                BackLink(title: "Back") { dismiss() }
+                VStack(alignment: .leading, spacing: AppTheme.space1) {
+                    Text(title)
+                        .font(AppFont.title)
+                        .foregroundStyle(AppTheme.text)
+                    Text(subtitle)
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
+                }
+
+                HStack(spacing: 1) {
+                    StatCell(title: "Receipts", value: "\(receipts.count)", valueSize: 15)
+                    StatCell(title: "Amount", value: amount.formatted(.currency(code: store.defaultCurrencyCode)), valueSize: 15)
+                }
+                .background(AppTheme.divider)
+
                 if receipts.isEmpty {
-                    emptyState
+                    Text("No receipts found for this metric.")
+                        .font(AppFont.subhead)
+                        .foregroundStyle(AppTheme.textMuted)
+                        .padding(AppTheme.space4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(AppTheme.surface)
+                        .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
                 } else {
-                    LazyVStack(spacing: 12) {
+                    RuledStack {
                         ForEach(receipts) { invoice in
-                            NavigationLink {
-                                DashboardReceiptDetailView(
-                                    invoice: invoice,
-                                    defaultCurrencyCode: store.defaultCurrencyCode,
-                                    tint: tint,
-                                    onEdit: { onEdit(invoice) },
-                                    onDelete: { onDelete(invoice) }
-                                )
-                            } label: {
-                                DashboardDrillDownReceiptRow(invoice: invoice, defaultCurrencyCode: store.defaultCurrencyCode, tint: tint)
+                            RuledRow {
+                                NavigationLink {
+                                    DashboardReceiptDetailView(
+                                        invoice: invoice,
+                                        defaultCurrencyCode: store.defaultCurrencyCode,
+                                        onEdit: { onEdit(invoice) },
+                                        onDelete: { onDelete(invoice) }
+                                    )
+                                } label: {
+                                    drillDownRow(invoice)
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
-            .padding()
+            .padding(AppTheme.space4)
         }
-        .background(MellowPalette.accountingBackground.ignoresSafeArea())
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        .background(AppTheme.bg.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(title)
-                .font(.title2.weight(.bold))
-                .foregroundStyle(MellowPalette.accountingInk)
-            Text(subtitle)
-                .font(.subheadline)
-                .foregroundStyle(MellowPalette.accountingMuted)
-            HStack(spacing: 12) {
-                Label("\(receipts.count) receipt\(receipts.count == 1 ? "" : "s")", systemImage: "tray.full.fill")
-                Spacer()
-                Text(amount.formatted(.currency(code: store.defaultCurrencyCode)))
-                    .font(.title3.weight(.bold))
-                    .monospacedDigit()
-            }
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(MellowPalette.accountingNavy)
-            .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(MellowPalette.accountingCard)
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(MellowPalette.softBorder.opacity(0.52), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-    }
-
-    private var emptyState: some View {
-        Text("No receipts found for this metric.")
-            .font(.subheadline)
-            .foregroundStyle(MellowPalette.accountingMuted)
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(MellowPalette.accountingCard)
-            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-}
-
-private struct DashboardDrillDownReceiptRow: View {
-    let invoice: Invoice
-    let defaultCurrencyCode: String
-    let tint: Color
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Circle()
-                .fill(tint.opacity(0.14))
-                .frame(width: 44, height: 44)
-                .overlay(Text(initial).font(.headline.weight(.semibold)).foregroundStyle(tint))
-
-            VStack(alignment: .leading, spacing: 6) {
+    private func drillDownRow(_ invoice: Invoice) -> some View {
+        HStack(spacing: AppTheme.space3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(invoice.merchant ?? "Unknown merchant")
-                    .font(.headline)
-                    .foregroundStyle(MellowPalette.accountingInk)
+                    .font(AppFont.headline)
+                    .foregroundStyle(AppTheme.text)
                     .lineLimit(1)
                 Text(invoice.date.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .none) } ?? "No date")
-                    .font(.caption)
-                    .foregroundStyle(MellowPalette.accountingMuted)
-                HStack(spacing: 8) {
-                    Label(invoice.category ?? "Miscellaneous", systemImage: "tag.fill")
-                    if let cardLabel {
-                        Label(cardLabel, systemImage: "creditcard.fill")
-                    }
-                }
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(MellowPalette.accountingMuted)
-                .lineLimit(1)
-            }
-
-            Spacer(minLength: 10)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(invoice.reportingTotal(defaultCurrencyCode: defaultCurrencyCode).map { $0.formatted(.currency(code: defaultCurrencyCode)) } ?? "SGD pending")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(MellowPalette.accountingNavy)
+                    .font(AppFont.subhead)
+                    .foregroundStyle(AppTheme.textMuted)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                    .monospacedDigit()
-                if let original = invoice.displayReceiptAmount {
-                    Text("Receipt: \(original.formatted(.currency(code: invoice.displayReceiptCurrency)))")
-                        .font(.caption2)
-                        .foregroundStyle(MellowPalette.accountingMuted)
-                        .lineLimit(1)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(MellowPalette.accountingMuted)
             }
+            Spacer(minLength: AppTheme.space2)
+            Text(invoice.reportingTotal(defaultCurrencyCode: store.defaultCurrencyCode).map { $0.formatted(.currency(code: store.defaultCurrencyCode)) } ?? "Pending")
+                .font(AppFont.title2)
+                .foregroundStyle(AppTheme.text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(AppTheme.neutral600)
         }
-        .padding()
-        .background(MellowPalette.accountingCard)
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(MellowPalette.softBorder.opacity(0.40), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-    }
-
-    private var initial: String {
-        String((invoice.merchant ?? "Receipt").prefix(1)).uppercased()
-    }
-
-    private var cardLabel: String? {
-        guard let last4 = invoice.cardLast4?.nilIfEmpty else { return nil }
-        return "\(invoice.cardBank?.nilIfEmpty ?? "Unknown Bank") •••• \(last4)"
+        .padding(.vertical, AppTheme.space3)
+        .padding(.horizontal, AppTheme.space3)
+        .contentShape(Rectangle())
     }
 }
+
+// MARK: - Receipt detail (full page: View / Edit / Delete)
 
 private struct DashboardReceiptDetailView: View {
     let invoice: Invoice
     let defaultCurrencyCode: String
-    let tint: Color
     let onEdit: () -> Void
     let onDelete: () -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: AppTheme.space4) {
+                HStack {
+                    BackLink(title: "Back") { dismiss() }
+                    Spacer()
+                    Button("Edit", action: onEdit)
+                        .font(AppFont.headline)
+                        .foregroundStyle(AppTheme.accent700)
+                    Button(role: .destructive, action: onDelete) {
+                        Text("Delete")
+                    }
+                    .font(AppFont.headline)
+                    .foregroundStyle(AppTheme.accent700)
+                }
+
                 detailHeader
-                actionButtons
+
                 detailSection("Receipt", rows: receiptRows)
                 detailSection("Currency", rows: currencyRows)
                 detailSection("Payment", rows: paymentRows)
                 if !invoice.rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     rawTextSection
                 }
-                actionButtons
             }
-            .padding()
+            .padding(AppTheme.space4)
         }
-        .background(MellowPalette.accountingBackground.ignoresSafeArea())
-        .navigationTitle(invoice.merchant ?? "Receipt")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button(action: onEdit) {
-                    Label("Edit", systemImage: "pencil")
-                }
-                Button(role: .destructive, action: onDelete) {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
-        }
+        .background(AppTheme.bg.ignoresSafeArea())
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var detailHeader: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(tint.opacity(0.16))
-                    .frame(width: 52, height: 52)
-                    .overlay(Text(initial).font(.title3.weight(.bold)).foregroundStyle(tint))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(invoice.merchant ?? "Unknown merchant")
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(MellowPalette.accountingInk)
-                    Text(invoice.date.map { DateFormatter.localizedString(from: $0, dateStyle: .full, timeStyle: .none) } ?? "No date")
-                        .font(.subheadline)
-                        .foregroundStyle(MellowPalette.accountingMuted)
-                }
-            }
-            Text(invoice.reportingTotal(defaultCurrencyCode: defaultCurrencyCode).map { $0.formatted(.currency(code: defaultCurrencyCode)) } ?? "SGD conversion pending")
-                .font(.largeTitle.weight(.black))
-                .foregroundStyle(MellowPalette.accountingNavy)
-                .monospacedDigit()
+        VStack(alignment: .leading, spacing: AppTheme.space2) {
+            Text(invoice.merchant ?? "Unknown merchant")
+                .font(AppFont.title)
+                .foregroundStyle(AppTheme.text)
+            Text(invoice.date.map { DateFormatter.localizedString(from: $0, dateStyle: .full, timeStyle: .none) } ?? "No date")
+                .font(AppFont.subhead)
+                .foregroundStyle(AppTheme.textMuted)
+            Text(invoice.reportingTotal(defaultCurrencyCode: defaultCurrencyCode).map { $0.formatted(.currency(code: defaultCurrencyCode)) } ?? "Conversion pending")
+                .font(AppFont.heading(30))
+                .foregroundStyle(AppTheme.text)
             if let original = invoice.displayReceiptAmount {
                 Text("Receipt amount: \(original.formatted(.currency(code: invoice.displayReceiptCurrency)))")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(MellowPalette.accountingMuted)
+                    .font(AppFont.subhead)
+                    .foregroundStyle(AppTheme.textMuted)
             }
+            RuleLine()
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(MellowPalette.accountingCard)
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(MellowPalette.softBorder.opacity(0.50), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     private var receiptRows: [(String, String)] {
@@ -853,7 +615,7 @@ private struct DashboardReceiptDetailView: View {
 
     private var currencyRows: [(String, String)] {
         [
-            ("Total Amount", invoice.reportingTotal(defaultCurrencyCode: defaultCurrencyCode).map { $0.formatted(.currency(code: defaultCurrencyCode)) } ?? "SGD conversion pending"),
+            ("Total Amount", invoice.reportingTotal(defaultCurrencyCode: defaultCurrencyCode).map { $0.formatted(.currency(code: defaultCurrencyCode)) } ?? "Conversion pending"),
             ("Receipt Amount", invoice.displayReceiptAmount.map { $0.formatted(.currency(code: invoice.displayReceiptCurrency)) } ?? "—"),
             ("Receipt Currency", invoice.displayReceiptCurrency),
             ("Conversion Rate", invoice.conversionRate?.description ?? "Not stored")
@@ -869,175 +631,41 @@ private struct DashboardReceiptDetailView: View {
     }
 
     private func detailSection(_ title: String, rows: [(String, String)]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(MellowPalette.accountingInk)
-            ForEach(rows, id: \.0) { label, value in
-                HStack(alignment: .top, spacing: 12) {
-                    Text(label)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(MellowPalette.accountingMuted)
-                        .frame(width: 120, alignment: .leading)
-                    Text(value)
-                        .font(.subheadline)
-                        .foregroundStyle(MellowPalette.accountingInk)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+        VStack(alignment: .leading, spacing: AppTheme.space3) {
+            SectionLabel(text: title)
+            RuledStack {
+                ForEach(rows, id: \.0) { label, value in
+                    RuledRow {
+                        HStack(alignment: .top, spacing: AppTheme.space3) {
+                            Text(label)
+                                .font(AppFont.subhead)
+                                .foregroundStyle(AppTheme.textMuted)
+                                .frame(width: 110, alignment: .leading)
+                            Text(value)
+                                .font(AppFont.body15)
+                                .foregroundStyle(AppTheme.text)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.vertical, AppTheme.space3)
+                        .padding(.horizontal, AppTheme.space3)
+                    }
                 }
             }
         }
-        .padding()
-        .background(MellowPalette.accountingCard)
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(MellowPalette.softBorder.opacity(0.42), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     private var rawTextSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Raw OCR Text")
-                .font(.headline)
-                .foregroundStyle(MellowPalette.accountingInk)
+        VStack(alignment: .leading, spacing: AppTheme.space3) {
+            SectionLabel(text: "Raw OCR Text")
             Text(invoice.rawText)
-                .font(.caption.monospaced())
-                .foregroundStyle(MellowPalette.accountingMuted)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(AppTheme.textMuted)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(AppTheme.space3)
+                .background(AppTheme.surface)
+                .overlay(Rectangle().stroke(AppTheme.divider, lineWidth: 1))
         }
-        .padding()
-        .background(MellowPalette.accountingCard)
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(MellowPalette.softBorder.opacity(0.42), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-    }
-
-    private var actionButtons: some View {
-        HStack(spacing: 12) {
-            Button(action: onEdit) {
-                Label("Edit", systemImage: "pencil")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(tint)
-
-            Button(role: .destructive, action: onDelete) {
-                Label("Delete", systemImage: "trash")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-        }
-        .font(.subheadline.weight(.semibold))
-    }
-
-    private var initial: String {
-        String((invoice.merchant ?? "Receipt").prefix(1)).uppercased()
-    }
-}
-
-private struct ReceiptRow: View {
-    let invoice: Invoice
-    let defaultCurrencyCode: String
-    let onEdit: () -> Void
-    let onDelete: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                Circle()
-                    .fill(LinearGradient(colors: [MellowPalette.dustyBlue.opacity(0.14), MellowPalette.mauve.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                    .frame(width: 48, height: 48)
-                    .overlay(Text(initial).font(.headline.weight(.semibold)).foregroundStyle(MellowPalette.dustyBlue))
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(invoice.merchant ?? "Unknown merchant")
-                        .font(.headline.weight(.semibold))
-                        .foregroundStyle(MellowPalette.text)
-                        .lineLimit(1)
-                    Text(invoice.date.map { DateFormatter.localizedString(from: $0, dateStyle: .medium, timeStyle: .none) } ?? "No date")
-                        .font(.caption)
-                        .foregroundStyle(MellowPalette.secondaryText)
-                    Label(invoice.category ?? "Miscellaneous", systemImage: "tag.fill")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(MellowPalette.mauve.opacity(0.11))
-                        .foregroundStyle(MellowPalette.mauve)
-                        .clipShape(Capsule())
-                    if let cardLabel {
-                        Label(cardLabel, systemImage: "creditcard.fill")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 5)
-                            .background(MellowPalette.clay.opacity(0.11))
-                            .foregroundStyle(MellowPalette.clay)
-                            .clipShape(Capsule())
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(invoice.reportingTotal(defaultCurrencyCode: defaultCurrencyCode).map { $0.formatted(.currency(code: defaultCurrencyCode)) } ?? "SGD pending")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(MellowPalette.text)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    if let original = invoice.displayReceiptAmount {
-                        Text("Receipt: \(original.formatted(.currency(code: invoice.displayReceiptCurrency)))")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(MellowPalette.secondaryText)
-                            .lineLimit(1)
-                    }
-                }
-            }
-
-            HStack(spacing: 10) {
-                NavigationLink {
-                    DashboardReceiptDetailView(
-                        invoice: invoice,
-                        defaultCurrencyCode: defaultCurrencyCode,
-                        tint: MellowPalette.dustyBlue,
-                        onEdit: onEdit,
-                        onDelete: onDelete
-                    )
-                } label: {
-                    Label("View", systemImage: "eye")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(MellowPalette.sage)
-
-                Button(action: onEdit) {
-                    Label("Edit", systemImage: "pencil")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(MellowPalette.dustyBlue)
-
-                Button(role: .destructive, action: onDelete) {
-                    Label("Delete", systemImage: "trash")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(MellowPalette.clay)
-            }
-            .font(.subheadline.weight(.semibold))
-        }
-        .padding(16)
-        .background(MellowPalette.card.opacity(0.82))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .shadow(color: MellowPalette.cocoa.opacity(0.035), radius: 8, y: 4)
-    }
-
-    private var initial: String {
-        String((invoice.merchant ?? "Receipt").prefix(1)).uppercased()
-    }
-
-    private var cardLabel: String? {
-        guard let last4 = invoice.cardLast4?.nilIfEmpty else { return nil }
-        return "\(invoice.cardBank?.nilIfEmpty ?? "Unknown Bank") •••• \(last4)"
     }
 }

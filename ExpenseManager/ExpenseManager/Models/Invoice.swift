@@ -60,6 +60,7 @@ extension Invoice {
         "Subscriptions",
         "Services",
         "Credit Card Bill Payment",
+        "ATM Cash Withdrawal",
         "Miscellaneous"
     ]
 
@@ -260,6 +261,10 @@ struct InvoiceParser {
             return "Credit Card Bill Payment"
         }
 
+        if isATMWithdrawal(text: haystack) {
+            return "ATM Cash Withdrawal"
+        }
+
         if isPayNowTransfer(text: haystack), payNowRecipientLooksLikePerson(text: haystack, merchant: merchant) {
             return "Services"
         }
@@ -298,6 +303,18 @@ struct InvoiceParser {
         let hasPayment = text.contains("bill payment") || text.contains("payment received") || text.contains("payment confirmation") || text.contains("payment successful") || text.contains("paid")
         let hasBankContext = text.contains("minimum payment") || text.contains("statement") || text.contains("outstanding") || text.contains("card account") || text.contains("amount due")
         return hasCard && hasPayment && hasBankContext
+    }
+
+    static func isATMWithdrawal(text: String) -> Bool {
+        let normalized = text.lowercased()
+        return [
+            "atm withdrawal",
+            "cash withdrawal",
+            "atm cash",
+            "withdrawal fee",
+            "cash advance",
+            "atm transaction"
+        ].contains { normalized.contains($0) }
     }
 
     static func isPayNowTransfer(text: String) -> Bool {
@@ -341,7 +358,10 @@ struct InvoiceParser {
             "transfer",
             "sent to",
             "paid to",
-            "merchant"
+            "merchant",
+            "withdraw",
+            "withdrawal",
+            "atm"
         ].contains { normalized.contains($0) } || isReversalTransaction(text: text)
         let hasNonExpenseCue = [
             "otp",
