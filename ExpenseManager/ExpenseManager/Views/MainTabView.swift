@@ -78,6 +78,7 @@ struct MainTabView: View {
 private struct ToolsView: View {
     @ObservedObject var store: ReceiptStore
     let onShowReport: () -> Void
+    @State private var showingSMSImport = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -133,8 +134,21 @@ private struct ToolsView: View {
                         }
                     }
                     RuledRow {
-                        toolRow(title: store.gmailAgentTitle, subtitle: store.gmailAgentSubtitle, icon: "envelope.badge") {
-                            store.toggleGmailAgent()
+                        toolRow(
+                            title: store.gmailAgentIsRunning ? "Stop Agent" : "Scan Gmail",
+                            subtitle: store.gmailAgentIsRunning ? "Scanning now" : "Gmail receipts",
+                            icon: store.gmailAgentIsRunning ? "stop.circle" : "envelope.badge"
+                        ) {
+                            if store.gmailAgentIsRunning {
+                                store.toggleGmailAgent()
+                            } else {
+                                store.startManualGmailScanSinceLastCheck()
+                            }
+                        }
+                    }
+                    RuledRow {
+                        toolRow(title: "Scan SMS", subtitle: "Paste bank alert", icon: "message.badge") {
+                            showingSMSImport = true
                         }
                     }
                     RuledRow { dailyAgentRow }
@@ -183,6 +197,9 @@ private struct ToolsView: View {
         }
         .background(AppTheme.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
+        .sheet(isPresented: $showingSMSImport) {
+            SMSImportSheet(store: store)
+        }
     }
 
     private var dailyAgentRow: some View {

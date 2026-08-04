@@ -154,23 +154,6 @@ class ReceiptStore: ObservableObject {
         return "Using single-user anon RLS policies"
     }
 
-    var gmailAgentTitle: String {
-        gmailAgentIsRunning ? "Stop Agent" : "Scan Gmail + SMS Inbox"
-    }
-
-    var gmailAgentSubtitle: String {
-        if gmailAgentIsRunning {
-            return gmailScanSummary ?? "Scanning Gmail and SMS inbox now"
-        }
-        if let gmailScanSummary {
-            return gmailScanSummary
-        }
-        if let gmailLastScanDate {
-            return "Last scan: \(DateFormatter.localizedString(from: gmailLastScanDate, dateStyle: .medium, timeStyle: .short))"
-        }
-        return "Reads Gmail receipts and SMS inbox alerts"
-    }
-
     var gmailScheduleSubtitle: String {
         if gmailAgentIsRunning {
             return "Scanning now"
