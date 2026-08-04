@@ -138,7 +138,6 @@ actor SupabaseService {
     let supabaseUrl: URL
     let supabaseAnonKey: String
     let edgeFunctionBaseUrl: URL
-    private var shouldUseLegacyReceiptInsert = false
     private let authCredentialStore: SupabaseCredentialStore
     private var authSession: SupabaseAuthSession?
     private var useAnonymousAccess = true
@@ -646,16 +645,11 @@ actor SupabaseService {
     }
 
     func insertReceiptToDB(parsed: ParsedReceipt, rawText: String? = nil, fileUrl: String?) async throws -> UUID {
-        if shouldUseLegacyReceiptInsert {
-            return try await insertReceiptToDB(parsed: parsed, rawText: rawText, fileUrl: fileUrl, includeOptionalColumns: false)
-        }
-
         do {
             return try await insertReceiptToDB(parsed: parsed, rawText: rawText, fileUrl: fileUrl, includeOptionalColumns: true)
         } catch {
             guard isMissingColumnError(error) else { throw error }
-            shouldUseLegacyReceiptInsert = true
-            AppSecurity.debugLog("Optional receipt columns are missing or not visible in Supabase schema cache. Retrying with legacy-compatible payload.")
+            AppSecurity.debugLog("Optional receipt columns missing or not visible in Supabase schema cache for this insert. Retrying this one receipt with a legacy-compatible payload.")
             return try await insertReceiptToDB(parsed: parsed, rawText: rawText, fileUrl: fileUrl, includeOptionalColumns: false)
         }
     }
