@@ -1,13 +1,14 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 
-// Edge function that takes { raw_text } and calls Anthropic to extract structured receipt data.
+// Edge function that takes { raw_text } and calls Google Gemini's OpenAI-compatible
+// chat completions API to extract structured receipt data.
 // Environment variables required:
-// - ANTHROPIC_API_KEY
-// - ANTHROPIC_MODEL (optional)
+// - LLM_API_KEY   (a Google AI Studio / Gemini API key)
+// - LLM_MODEL (optional)
 
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
-const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')
-const ANTHROPIC_MODEL = Deno.env.get('ANTHROPIC_MODEL') ?? 'claude-3-5-sonnet-latest'
+const LLM_API_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+const LLM_API_KEY = Deno.env.get('LLM_API_KEY')
+const LLM_MODEL = Deno.env.get('LLM_MODEL') ?? 'gemini-3.6-flash'
 const MAX_RAW_TEXT_CHARS = 18_000
 
 const corsHeaders = {
@@ -44,7 +45,7 @@ serve(async (req) => {
       return jsonResponse({ error: 'raw_text is too large' }, 413)
     }
 
-    if (!ANTHROPIC_API_KEY) {
+    if (!LLM_API_KEY) {
       console.error('Receipt parser is not configured.')
       return jsonResponse({ error: 'Receipt parser is not configured' }, 500)
     }
@@ -55,12 +56,11 @@ serve(async (req) => {
       ? `\n\nUSER_CORRECTION_HINTS:\n${JSON.stringify(learning_hints)}\nIf OCR text contains a merchant_keyword, prefer the corrected values for merchant, category, currency, card_last4, and card_bank when applicable.`
       : ''
 
-    const anthropicBody = {
-      model: ANTHROPIC_MODEL,
+    const chatBody = {
+      model: LLM_MODEL,
       max_tokens: 1000,
-      temperature: 0,
-      system: systemPrompt,
       messages: [
+        { role: 'system', content: systemPrompt },
         {
           role: 'user',
           content: `OCR_TEXT:\n\n${raw_text}${correctionHintText}\n\nReturn JSON only.`
@@ -68,29 +68,26 @@ serve(async (req) => {
       ]
     }
 
-    const resp = await fetch(ANTHROPIC_API_URL, {
+    const resp = await fetch(LLM_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
+        Authorization: `Bearer ${LLM_API_KEY}`
       },
-      body: JSON.stringify(anthropicBody)
+      body: JSON.stringify(chatBody)
     })
 
     if (!resp.ok) {
-      console.error(`Anthropic request failed with status ${resp.status}.`)
-      return jsonResponse({ error: 'Receipt parser unavailable' }, 502)
+      const errBody = await resp.text()
+      console.error(`LLM request failed with status ${resp.status}: ${errBody}`)
+      return jsonResponse({ error: 'Receipt parser unavailable', detail: errBody }, 502)
     }
 
-    const anthropicJson = await resp.json()
-    const assistantText = anthropicJson?.content
-      ?.map((part: { type?: string; text?: string }) => part.type === 'text' ? part.text ?? '' : '')
-      .join('\n')
-      .trim()
+    const chatJson = await resp.json()
+    const assistantText = String(chatJson?.choices?.[0]?.message?.content ?? '').trim()
 
     if (!assistantText) {
-      console.error('Anthropic response did not include text content.')
+      console.error('LLM response did not include text content.')
       return jsonResponse({ error: 'Receipt parser returned no result' }, 502)
     }
 
