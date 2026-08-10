@@ -10,6 +10,8 @@ const LLM_API_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/cha
 const LLM_API_KEY = Deno.env.get('LLM_API_KEY')
 const LLM_MODEL = Deno.env.get('LLM_MODEL') ?? 'gemini-3.6-flash'
 const MAX_RAW_TEXT_CHARS = 18_000
+const MAX_IMAGE_BASE64_CHARS = 8_000_000 // ~6MB decoded; client compresses before upload
+const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -35,14 +37,25 @@ serve(async (req) => {
   try {
     const payload = await req.json()
     const raw_text = String(payload.raw_text ?? '').trim()
+    const image_base64 = typeof payload.image_base64 === 'string' ? payload.image_base64 : ''
+    const image_mime_type = typeof payload.image_mime_type === 'string' ? payload.image_mime_type : ''
     const learning_hints = sanitizeLearningHints(payload.learning_hints)
 
-    if (!raw_text) {
-      return jsonResponse({ error: 'raw_text is required' }, 400)
+    if (!raw_text && !image_base64) {
+      return jsonResponse({ error: 'raw_text or image_base64 is required' }, 400)
     }
 
     if (raw_text.length > MAX_RAW_TEXT_CHARS) {
       return jsonResponse({ error: 'raw_text is too large' }, 413)
+    }
+
+    if (image_base64) {
+      if (!ALLOWED_IMAGE_MIME_TYPES.has(image_mime_type)) {
+        return jsonResponse({ error: 'image_mime_type must be image/jpeg, image/png, or image/webp' }, 400)
+      }
+      if (image_base64.length > MAX_IMAGE_BASE64_CHARS) {
+        return jsonResponse({ error: 'image_base64 is too large' }, 413)
+      }
     }
 
     if (!LLM_API_KEY) {
@@ -50,21 +63,34 @@ serve(async (req) => {
       return jsonResponse({ error: 'Receipt parser is not configured' }, 500)
     }
 
-    const systemPrompt = `Extract structured receipt data from OCR text. Respond with one valid JSON object only. Keys: merchant, date, total, currency, extracted_digits, card_last4, card_bank, category, line_items. date must be yyyy-mm-dd when possible. total must be numeric. currency must be a 3-letter ISO code, default SGD when unclear. extracted_digits and card_last4 must contain only the last 4 digits of the payment card used, such as digits near VISA, MasterCard, AMEX, CARD, CREDIT, DEBIT, ****, xxxx, or similar payment markers; use null if unknown. card_bank should be null unless the receipt explicitly names the issuing bank. Infer category from merchant name, receipt headers, and line item descriptions. category must be exactly one of: Groceries, Food & Dining, Electronics, Clothing, Entertainment, Fuel, EV Charging, Utilities, Travel, Health, Home, Subscriptions, Services, Credit Card Bill Payment, Miscellaneous. Use Groceries for supermarkets, grocery stores, produce, household grocery items, and wholesale grocery runs. Use Food & Dining for restaurants, cafes, bakeries, delivery, and prepared food. Use Electronics for computers, phones, appliances, accessories, and tech stores. Use Clothing for apparel, shoes, laundry, and fashion stores. Use Entertainment for movies, games, events, books, music, and leisure. Use Fuel for gas/petrol stations and fuel purchases. Use EV Charging for electric vehicle charging sessions or networks. Use Utilities for power, water, internet, phone, and recurring household bills. Use Travel for hotels, rideshare, transit, parking, flights, and car rentals. Use Health for pharmacy, medical, dental, fitness, and personal care. Use Home for hardware, furniture, home improvement, and garden supplies. Use Subscriptions for recurring memberships or digital services. Use Services for person-to-person PayNow/PayLah/bank-transfer alerts or service providers such as repair, cleaning, tuition, salon, consultation, handyman, electrician, or maintenance. Use Credit Card Bill Payment for bank confirmations that a credit card bill, card account, statement balance, minimum payment, outstanding balance, or amount due was paid. For PayNow alerts, treat the payee/vendor as merchant; if the payee sounds like a business, infer its business type from the vendor name and surrounding email text; if the payee sounds like a person, use Services. If multiple categories match, choose the category with the largest spend or strongest receipt evidence. Use Miscellaneous only when evidence is unclear. line_items is an array of {description, amount}. Use null for unknown scalar values and [] for unknown line_items.`
+    const systemPrompt = `Extract structured receipt data from OCR text. Respond with one valid JSON object only. Keys: merchant, date, total, currency, extracted_digits, card_last4, card_bank, category, line_items. date must be yyyy-mm-dd when possible; use the exact year printed on the receipt — never infer or adjust the year. When the date is numeric and ambiguous (e.g. 8/7/2026), assume day/month/year order (Singapore convention), i.e. 8/7/2026 means 8 July 2026, not August 7th — only use month/day order if the first number is greater than 12. total must be numeric. currency must be a 3-letter ISO code, default SGD when unclear. extracted_digits and card_last4 must contain only the last 4 digits of the payment card used, such as digits near VISA, MasterCard, AMEX, CARD, CREDIT, DEBIT, ****, xxxx, or similar payment markers; use null if unknown. card_bank should be null unless the receipt explicitly names the issuing bank. Infer category from merchant name, receipt headers, and line item descriptions. category must be exactly one of: Groceries, Food & Dining, Electronics, Clothing, Entertainment, Fuel, EV Charging, Utilities, Travel, Health, Home, Subscriptions, Services, Credit Card Bill Payment, Miscellaneous. Use Groceries for supermarkets, grocery stores, produce, household grocery items, and wholesale grocery runs. Use Food & Dining for restaurants, cafes, bakeries, delivery, and prepared food. Use Electronics for computers, phones, appliances, accessories, and tech stores. Use Clothing for apparel, shoes, laundry, and fashion stores. Use Entertainment for movies, games, events, books, music, and leisure. Use Fuel for gas/petrol stations and fuel purchases. Use EV Charging for electric vehicle charging sessions or networks. Use Utilities for power, water, internet, phone, and recurring household bills. Use Travel for hotels, rideshare, transit, parking, flights, and car rentals. Use Health for pharmacy, medical, dental, fitness, and personal care. Use Home for hardware, furniture, home improvement, and garden supplies. Use Subscriptions for recurring memberships or digital services. Use Services for person-to-person PayNow/PayLah/bank-transfer alerts or service providers such as repair, cleaning, tuition, salon, consultation, handyman, electrician, or maintenance. Use Credit Card Bill Payment for bank confirmations that a credit card bill, card account, statement balance, minimum payment, outstanding balance, or amount due was paid. For PayNow alerts, treat the payee/vendor as merchant; if the payee sounds like a business, infer its business type from the vendor name and surrounding email text; if the payee sounds like a person, use Services. If multiple categories match, choose the category with the largest spend or strongest receipt evidence. Use Miscellaneous only when evidence is unclear. line_items is an array of {description, amount}. Use null for unknown scalar values and [] for unknown line_items.`
 
     const correctionHintText = learning_hints.length > 0
       ? `\n\nUSER_CORRECTION_HINTS:\n${JSON.stringify(learning_hints)}\nIf OCR text contains a merchant_keyword, prefer the corrected values for merchant, category, currency, card_last4, and card_bank when applicable.`
       : ''
 
+    // Image path: let the vision-capable model read the photo directly rather
+    // than requiring a separate OCR step (this is what makes the webapp's
+    // camera-capture flow work without any on-device OCR, unlike iOS's Vision
+    // framework-based OCRService).
+    const userContent = image_base64
+      ? [
+          { type: 'text', text: `Extract structured receipt data from this receipt photo.${correctionHintText}\n\nReturn JSON only.` },
+          { type: 'image_url', image_url: { url: `data:${image_mime_type};base64,${image_base64}` } }
+        ]
+      : `OCR_TEXT:\n\n${raw_text}${correctionHintText}\n\nReturn JSON only.`
+
     const chatBody = {
       model: LLM_MODEL,
-      max_tokens: 1000,
+      // Gemini tends to narrate in prose/markdown before settling into JSON
+      // (previously hit finish_reason "length" and got cut off mid-answer at
+      // 1000 tokens) — response_format forces JSON-only output, and the
+      // higher budget is headroom in case it still doesn't.
+      max_tokens: 2000,
+      response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
-        {
-          role: 'user',
-          content: `OCR_TEXT:\n\n${raw_text}${correctionHintText}\n\nReturn JSON only.`
-        }
+        { role: 'user', content: userContent }
       ]
     }
 
@@ -85,6 +111,7 @@ serve(async (req) => {
 
     const chatJson = await resp.json()
     const assistantText = String(chatJson?.choices?.[0]?.message?.content ?? '').trim()
+    const lastFinishReason = chatJson?.choices?.[0]?.finish_reason ?? null
 
     if (!assistantText) {
       console.error('LLM response did not include text content.')
@@ -95,8 +122,8 @@ serve(async (req) => {
       const parsed = JSON.parse(extractJsonObject(assistantText))
       return jsonResponse(parsed)
     } catch (_err) {
-      console.error('Receipt parser returned invalid JSON.')
-      return jsonResponse({ error: 'Receipt parser returned invalid data' }, 502)
+      console.error(`Receipt parser returned invalid JSON: ${assistantText}`)
+      return jsonResponse({ error: 'Receipt parser returned invalid data', detail: assistantText, finishReason: lastFinishReason }, 502)
     }
   } catch (err) {
     const message = err instanceof Error ? err.name : 'UnknownError'

@@ -1,5 +1,6 @@
 import { env } from './env'
 import { receiptFromRow } from './receiptShape'
+import { randomId } from './id'
 import type { Receipt, ParsedReceipt, PaymentMethod } from '../types/receipt'
 
 const REST_URL = `${env.supabaseUrl}/rest/v1`
@@ -25,22 +26,17 @@ function isMissingColumnError(message: string): boolean {
     (m.includes('column') && (m.includes('could not find') || m.includes('does not exist')))
 }
 
-const RECEIPTS_SELECT_FULL =
-  'id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,default_currency,receipt_amount,receipt_currency,conversion_rate,converted_total,category'
-const RECEIPTS_SELECT_LEGACY = 'id,merchant,date,total,currency,file_url,raw_ocr_json'
+// receipts only has category/card_last4/card_bank as real optional top-level
+// columns (confirmed against the live schema) — default_currency/receipt_amount/
+// receipt_currency/conversion_rate/converted_total live only inside raw_ocr_json,
+// so there's no reason to ever request them here (unlike insert/update, which
+// still probe for them in case the schema changes and fall back on a miss).
+const RECEIPTS_SELECT = 'id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,category'
 
 export async function listReceipts(): Promise<Receipt[]> {
-  let resp = await fetch(`${REST_URL}/receipts?select=${encodeURIComponent(RECEIPTS_SELECT_FULL)}`, {
+  const resp = await fetch(`${REST_URL}/receipts?select=${encodeURIComponent(RECEIPTS_SELECT)}`, {
     headers: baseHeaders()
   })
-  if (!resp.ok) {
-    const body = await resp.text()
-    if (isMissingColumnError(body)) {
-      resp = await fetch(`${REST_URL}/receipts?select=${encodeURIComponent(RECEIPTS_SELECT_LEGACY)}`, {
-        headers: baseHeaders()
-      })
-    }
-  }
   await throwIfNotOk(resp, 'Fetch receipts failed')
   const rows = await resp.json()
   if (!Array.isArray(rows)) return []
@@ -162,6 +158,40 @@ export async function parseReceiptText(rawText: string): Promise<ParsedReceipt> 
   })
   await throwIfNotOk(resp, 'Parse receipt failed')
   return resp.json()
+}
+
+export async function parseReceiptImage(imageBase64: string, imageMimeType: string): Promise<ParsedReceipt> {
+  const resp = await fetch(`${FUNCTIONS_URL}/parse-receipt`, {
+    method: 'POST',
+    headers: { ...baseHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image_base64: imageBase64, image_mime_type: imageMimeType })
+  })
+  await throwIfNotOk(resp, 'Parse receipt image failed')
+  return resp.json()
+}
+
+function sanitizedStorageFilename(filename: string): string {
+  const sanitized = filename
+    .replace(/[^A-Za-z0-9-_.]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '')
+  return sanitized || randomId()
+}
+
+// Mirrors SupabaseService.uploadReceiptImage's unauthenticated path (no user
+// session in this webapp, so no <uid>/ prefix — matches iOS's own fallback
+// when authSession is nil).
+export async function uploadReceiptImage(blob: Blob, filenameHint: string): Promise<string> {
+  const bucket = 'receipt-documents'
+  const safeFilename = `${randomId()}-${sanitizedStorageFilename(filenameHint)}`
+
+  const resp = await fetch(`${env.supabaseUrl}/storage/v1/object/${bucket}/${safeFilename}`, {
+    method: 'POST',
+    headers: { ...baseHeaders(), 'Content-Type': blob.type || 'image/jpeg' },
+    body: blob
+  })
+  await throwIfNotOk(resp, 'Upload receipt image failed')
+  return `${env.supabaseUrl}/storage/v1/object/public/${bucket}/${safeFilename}`
 }
 
 // Ported from PaymentMappingService.findPaymentMethod
