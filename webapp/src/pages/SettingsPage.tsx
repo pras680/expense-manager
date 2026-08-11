@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useSettings } from '../hooks/useSettings'
+import { useAuth } from '../hooks/useAuth'
 import { COMMON_CURRENCIES } from '../lib/categories'
 
 export function SettingsPage() {
   const { defaultCurrency, setDefaultCurrency, loading } = useSettings()
+  const { session, signOut } = useAuth()
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -41,6 +43,18 @@ export function SettingsPage() {
           converts receipts into.
         </p>
         {saved && <p className="mt-2 text-xs text-teal-700 dark:text-teal-400">Saved.</p>}
+      </div>
+
+      <div className="mt-8 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+        {session?.email && (
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">Signed in as {session.email}</p>
+        )}
+        <button
+          onClick={signOut}
+          className="mt-2 rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-medium text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100"
+        >
+          Sign Out
+        </button>
       </div>
     </div>
   )

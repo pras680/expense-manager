@@ -27,7 +27,7 @@ serve(async (req) => {
   }
 
   const providedSecret = req.headers.get('x-sms-ingest-secret') ?? ''
-  if (providedSecret !== SMS_INGEST_SECRET) {
+  if (!timingSafeEqual(providedSecret, SMS_INGEST_SECRET)) {
     return jsonResponse({ error: 'Unauthorized' }, 401)
   }
 
@@ -143,6 +143,21 @@ function safeMetadata(value: unknown) {
     output[safeKey] = safeOptionalString(rawValue).slice(0, 200)
   }
   return output
+}
+
+// Compares in time proportional to the input length only, never short-circuiting
+// on the first differing byte, so response timing can't be used to recover the
+// secret one character at a time. Length is compared via the same accumulator so
+// a wrong-length guess isn't distinguishable either.
+function timingSafeEqual(a: string, b: string): boolean {
+  const aBytes = new TextEncoder().encode(a)
+  const bBytes = new TextEncoder().encode(b)
+  let diff = aBytes.length ^ bBytes.length
+  const max = Math.max(aBytes.length, bBytes.length)
+  for (let i = 0; i < max; i++) {
+    diff |= (aBytes[i] ?? 0) ^ (bBytes[i] ?? 0)
+  }
+  return diff === 0
 }
 
 async function sha256Hex(input: string) {

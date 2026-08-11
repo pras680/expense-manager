@@ -71,6 +71,35 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
+// Reading claims without re-verifying the signature is only safe because this
+// function is deployed with verify_jwt=true, so Supabase's gateway has already
+// validated the signature and expiry before we see the request.
+function jwtRole(token: string): string | null {
+  const segments = token.split('.')
+  if (segments.length !== 3) return null // opaque key, not a JWT
+  try {
+    const payload = segments[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=')
+    const claims = JSON.parse(atob(padded))
+    return typeof claims?.role === 'string' ? claims.role : null
+  } catch {
+    return null
+  }
+}
+
+// Constant-time comparison — never short-circuits on the first differing byte,
+// so response timing can't be used to recover the key incrementally.
+function timingSafeEqual(a: string, b: string): boolean {
+  const aBytes = new TextEncoder().encode(a)
+  const bBytes = new TextEncoder().encode(b)
+  let diff = aBytes.length ^ bBytes.length
+  const max = Math.max(aBytes.length, bBytes.length)
+  for (let i = 0; i < max; i++) {
+    diff |= (aBytes[i] ?? 0) ^ (bBytes[i] ?? 0)
+  }
+  return diff === 0
+}
+
 async function convertCurrency(
   amount: number,
   from: string,
@@ -114,6 +143,20 @@ serve(async (req) => {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     console.error('process-sms-inbox: Supabase Edge Function environment is incomplete.')
     return jsonResponse({ error: 'process-sms-inbox is not configured' }, 500)
+  }
+
+  // Only the pg_cron job (which authenticates with the service_role key) may run
+  // this. Supabase's verify_jwt gate alone isn't enough: the public anon key is a
+  // valid credential there, and it ships inside the iOS binary and the web app's
+  // JS bundle, so without this check anyone could drive the inbox drain.
+  const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim()
+  // Accept an exact match on the injected key, or any token carrying the
+  // service_role claim — the cron job supplies its key from Vault, which may be
+  // the legacy JWT-format key while the injected env var is the newer opaque
+  // sb_secret_ format (or vice versa). Matching on either avoids a silent
+  // cron outage from a pure format mismatch.
+  if (!timingSafeEqual(bearer, SUPABASE_SERVICE_ROLE_KEY) && jwtRole(bearer) !== 'service_role') {
+    return jsonResponse({ error: 'Unauthorized' }, 401)
   }
 
   const headers: RestHeaders = {

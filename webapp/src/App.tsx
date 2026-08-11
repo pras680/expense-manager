@@ -1,7 +1,9 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { NavBar } from './components/NavBar'
+import { AuthProvider, useAuth } from './hooks/useAuth'
 import { ReceiptsProvider } from './hooks/useReceipts'
 import { SettingsProvider } from './hooks/useSettings'
+import { SignInPage } from './pages/SignInPage'
 import { ReceiptsListPage } from './pages/ReceiptsListPage'
 import { AddReceiptPage } from './pages/AddReceiptPage'
 import { EditReceiptPage } from './pages/EditReceiptPage'
@@ -9,7 +11,17 @@ import { ReportsOverviewPage } from './pages/ReportsOverviewPage'
 import { ReportsByCategoryPage } from './pages/ReportsByCategoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 
-function App() {
+function AuthGate() {
+  const { session, loading } = useAuth()
+
+  if (loading) {
+    return <div className="flex min-h-dvh items-center justify-center text-sm text-neutral-500">Loading…</div>
+  }
+
+  if (!session) {
+    return <SignInPage />
+  }
+
   return (
     <BrowserRouter>
       <ReceiptsProvider>
@@ -31,6 +43,14 @@ function App() {
         </SettingsProvider>
       </ReceiptsProvider>
     </BrowserRouter>
+  )
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   )
 }
 

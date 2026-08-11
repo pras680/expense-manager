@@ -6,10 +6,21 @@ import type { Receipt, ParsedReceipt, PaymentMethod } from '../types/receipt'
 const REST_URL = `${env.supabaseUrl}/rest/v1`
 const FUNCTIONS_URL = `${env.supabaseUrl}/functions/v1`
 
+// Set by AuthProvider whenever the session changes (mirrors how iOS's
+// ReceiptStore.signInToSupabase pushes the access token into
+// PaymentMappingService). apikey stays the anon key always — that's a
+// gateway-routing header, not an auth decision; RLS is enforced off the
+// Authorization bearer token's role (anon vs authenticated).
+let currentAccessToken: string | null = null
+
+export function setAuthToken(token: string | null): void {
+  currentAccessToken = token
+}
+
 function baseHeaders(): Record<string, string> {
   return {
     apikey: env.supabaseAnonKey,
-    Authorization: `Bearer ${env.supabaseAnonKey}`
+    Authorization: `Bearer ${currentAccessToken ?? env.supabaseAnonKey}`
   }
 }
 
@@ -178,9 +189,13 @@ function sanitizedStorageFilename(filename: string): string {
   return sanitized || randomId()
 }
 
-// Mirrors SupabaseService.uploadReceiptImage's unauthenticated path (no user
-// session in this webapp, so no <uid>/ prefix — matches iOS's own fallback
-// when authSession is nil).
+// Uploads under a flat, random-UUID-prefixed name rather than a <uid>/ path.
+// That's deliberate: receipts are shared across the household, so scoping
+// objects per user would hide each member's photos from the others without
+// defending against the threat that matters (an unauthenticated stranger) —
+// that's handled by the bucket being private with authenticated-only policies
+// (see supabase-edge/storage-lockdown-receipt-documents.sql). baseHeaders()
+// carries the signed-in user's access token, so these uploads satisfy them.
 export async function uploadReceiptImage(blob: Blob, filenameHint: string): Promise<string> {
   const bucket = 'receipt-documents'
   const safeFilename = `${randomId()}-${sanitizedStorageFilename(filenameHint)}`

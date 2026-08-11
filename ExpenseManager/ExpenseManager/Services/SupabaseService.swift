@@ -151,6 +151,7 @@ actor SupabaseService {
             account: URL(string: supabaseUrl)?.host ?? supabaseUrl
         )
         self.authSession = authCredentialStore.loadSession()
+        self.useAnonymousAccess = (self.authSession == nil)
     }
 
     func currentSession() -> SupabaseAuthSession? {

@@ -9,6 +9,18 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 const LLM_API_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
 const LLM_API_KEY = Deno.env.get('LLM_API_KEY')
 const LLM_MODEL = Deno.env.get('LLM_MODEL') ?? 'gemini-3.6-flash'
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+
+// Supabase's verify_jwt gate accepts the public anon key, which ships inside the
+// iOS binary and the web app's JS bundle — so by default this function is an
+// open, unmetered proxy to a paid LLM. Setting REQUIRE_AUTH=true restricts it to
+// real signed-in users (role=authenticated) and the service_role caller used by
+// process-sms-inbox.
+//
+// Off by default so the iOS app (which calls this with the anon key unless
+// signed in) keeps working until sign-in is set up there; flip it on with:
+//   supabase secrets set REQUIRE_AUTH=true --project-ref <ref>
+const REQUIRE_AUTH = (Deno.env.get('REQUIRE_AUTH') ?? '').toLowerCase() === 'true'
 const MAX_RAW_TEXT_CHARS = 18_000
 const MAX_IMAGE_BASE64_CHARS = 8_000_000 // ~6MB decoded; client compresses before upload
 const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -27,6 +39,10 @@ serve(async (req) => {
 
   if (req.method !== 'POST') {
     return jsonResponse({ error: 'Method not allowed' }, 405, { Allow: 'POST, OPTIONS' })
+  }
+
+  if (REQUIRE_AUTH && !isAuthorizedCaller(req)) {
+    return jsonResponse({ error: 'Unauthorized' }, 401)
   }
 
   const contentType = req.headers.get('content-type') ?? ''
@@ -104,9 +120,11 @@ serve(async (req) => {
     })
 
     if (!resp.ok) {
+      // Upstream bodies can carry provider/account/model details and quota state
+      // — log them server-side, but never echo them back to the caller.
       const errBody = await resp.text()
       console.error(`LLM request failed with status ${resp.status}: ${errBody}`)
-      return jsonResponse({ error: 'Receipt parser unavailable', detail: errBody }, 502)
+      return jsonResponse({ error: 'Receipt parser unavailable' }, 502)
     }
 
     const chatJson = await resp.json()
@@ -122,8 +140,8 @@ serve(async (req) => {
       const parsed = JSON.parse(extractJsonObject(assistantText))
       return jsonResponse(parsed)
     } catch (_err) {
-      console.error(`Receipt parser returned invalid JSON: ${assistantText}`)
-      return jsonResponse({ error: 'Receipt parser returned invalid data', detail: assistantText, finishReason: lastFinishReason }, 502)
+      console.error(`Receipt parser returned invalid JSON (finish_reason=${lastFinishReason}): ${assistantText}`)
+      return jsonResponse({ error: 'Receipt parser returned invalid data' }, 502)
     }
   } catch (err) {
     const message = err instanceof Error ? err.name : 'UnknownError'
@@ -131,6 +149,50 @@ serve(async (req) => {
     return jsonResponse({ error: 'Receipt parser request failed' }, 500)
   }
 })
+
+// Accepts either a real signed-in user (JWT with role=authenticated) or the
+// service_role caller used by process-sms-inbox. Rejects the anon/publishable
+// key, which is public by design.
+//
+// Reading claims without re-verifying the signature is only safe because this
+// function is deployed with verify_jwt=true, so Supabase's gateway has already
+// validated the signature and expiry before we ever see the request. If that
+// setting is ever turned off, this check must switch to verifying the JWT itself.
+function isAuthorizedCaller(req: Request): boolean {
+  const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim()
+  if (!bearer) return false
+
+  if (SUPABASE_SERVICE_ROLE_KEY && timingSafeEqual(bearer, SUPABASE_SERVICE_ROLE_KEY)) {
+    return true
+  }
+
+  const role = jwtRole(bearer)
+  return role === 'authenticated' || role === 'service_role'
+}
+
+function jwtRole(token: string): string | null {
+  const segments = token.split('.')
+  if (segments.length !== 3) return null // opaque key (e.g. sb_publishable_...), not a JWT
+  try {
+    const payload = segments[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=')
+    const claims = JSON.parse(atob(padded))
+    return typeof claims?.role === 'string' ? claims.role : null
+  } catch {
+    return null
+  }
+}
+
+function timingSafeEqual(a: string, b: string): boolean {
+  const aBytes = new TextEncoder().encode(a)
+  const bBytes = new TextEncoder().encode(b)
+  let diff = aBytes.length ^ bBytes.length
+  const max = Math.max(aBytes.length, bBytes.length)
+  for (let i = 0; i < max; i++) {
+    diff |= (aBytes[i] ?? 0) ^ (bBytes[i] ?? 0)
+  }
+  return diff === 0
+}
 
 function sanitizeLearningHints(value: unknown) {
   if (!Array.isArray(value)) return []
