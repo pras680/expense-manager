@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(curl -s -X POST https://lxxetltpuuwjtxmeemhx.supabase.co/functions/v1/process-sms-inbox -H 'apikey: sb_publishable_7jF_NW4pRe8y6T-mFrLtew_9VtCke9e' -H 'Authorization: Bearer sb_publishable_7jF_NW4pRe8y6T-mFrLtew_9VtCke9e' -H 'Content-Type: application/json' -d '{}' -w '\\\\nHTTP_STATUS:%{http_code}\\\\n')",
-      "Bash(curl -s 'https://lxxetltpuuwjtxmeemhx.supabase.co/rest/v1/sms_inbox?select=id,status,sender,received_at,error_message,receipt_id&order=received_at.desc&limit=10' -H 'apikey: sb_publishable_7jF_NW4pRe8y6T-mFrLtew_9VtCke9e' -H 'Authorization: Bearer sb_publishable_7jF_NW4pRe8y6T-mFrLtew_9VtCke9e')"
+      "Bash(curl -s 'https://lxxetltpuuwjtxmeemhx.supabase.co/rest/v1/sms_inbox?select=id,status,sender,received_at,error_message,receipt_id&order=received_at.desc&limit=10' -H 'apikey: sb_publishable_7jF_NW4pRe8y6T-mFrLtew_9VtCke9e' -H 'Authorization: Bearer sb_publishable_7jF_NW4pRe8y6T-mFrLtew_9VtCke9e')",
+      "Bash(grep -i \"\\\\.sql$\\\\|\\\\.md$\")"
     ]
   }
 }

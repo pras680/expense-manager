@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SupabaseSignInView: View {
     @ObservedObject var store: ReceiptStore
+    /// False when shown as the app's root gate, where there is nothing to go back to.
+    var isDismissable: Bool = false
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
@@ -25,7 +27,7 @@ struct SupabaseSignInView: View {
                         SecureField("••••••••", text: $password)
                             .textContentType(.password)
                     }
-                    Text("Optional. Use this only if you later switch from single-user anon policies to Auth-backed per-user RLS.")
+                    Text("Sign in with your household account. Each person sees their own receipts plus everything shared with the household.")
                         .font(AppFont.subhead)
                         .foregroundStyle(AppTheme.textMuted)
 
@@ -60,11 +62,15 @@ struct SupabaseSignInView: View {
 
     private var header: some View {
         HStack {
-            Button("Cancel") { dismiss() }
-                .font(AppFont.headline)
-                .foregroundStyle(AppTheme.accent700)
+            if isDismissable {
+                Button("Cancel") { dismiss() }
+                    .font(AppFont.headline)
+                    .foregroundStyle(AppTheme.accent700)
+            } else {
+                Color.clear.frame(width: 56, height: 1)
+            }
             Spacer()
-            Text("Supabase Auth")
+            Text("Sign In")
                 .font(AppFont.title2)
                 .foregroundStyle(AppTheme.text)
             Spacer()

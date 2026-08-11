@@ -1,3 +1,5 @@
+export type ReceiptVisibility = 'private' | 'household'
+
 export interface Receipt {
   id: string
   merchant: string | null
@@ -14,6 +16,11 @@ export interface Receipt {
   cardBank: string | null
   rawText: string
   fileUrl: string | null
+  /** Owner. Set server-side by the receipts_set_owner trigger, never by the client. */
+  userId: string | null
+  householdId: string | null
+  /** 'private' = owner only; 'household' = visible to and editable by all members. */
+  visibility: ReceiptVisibility
 }
 
 export interface ParsedReceipt {

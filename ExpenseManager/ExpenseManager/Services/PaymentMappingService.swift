@@ -10,24 +10,31 @@ struct PaymentMethod: Identifiable, Equatable {
 actor PaymentMappingService {
     let supabaseUrl: URL
     let supabaseAnonKey: String
-    private var authAccessToken: String?
+
+    /// Asks for a token at call time rather than holding a copy.
+    ///
+    /// This used to cache a token pushed in from ReceiptStore, which never
+    /// refreshed — so once it expired every card lookup failed, and because both
+    /// fetch paths swallow non-2xx responses the only symptom was every receipt
+    /// silently coming back as "Unknown Bank". Delegating to SupabaseService,
+    /// which refreshes on demand, removes that whole failure mode.
+    private var tokenProvider: (@Sendable () async -> String?)?
 
     init(supabaseUrl: String, supabaseAnonKey: String) {
         self.supabaseUrl = URL(string: supabaseUrl)!
         self.supabaseAnonKey = supabaseAnonKey
     }
 
-    func setAuthAccessToken(_ token: String?) {
-        authAccessToken = token
+    func setTokenProvider(_ provider: (@Sendable () async -> String?)?) {
+        tokenProvider = provider
     }
 
-    private func applyHeaders(to request: inout URLRequest) {
-        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        if let authAccessToken {
-            request.setValue("Bearer \(authAccessToken)", forHTTPHeaderField: "Authorization")
-        } else {
-            request.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
+    private func applyHeaders(to request: inout URLRequest) async throws {
+        guard let token = await tokenProvider?() else {
+            throw SupabaseAuthError.notAuthenticated
         }
+        request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     }
 
     // Query payment_methods table for a matching last_digits.
@@ -47,7 +54,7 @@ actor PaymentMappingService {
 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
-        applyHeaders(to: &req)
+        try await applyHeaders(to: &req)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
@@ -95,7 +102,7 @@ actor PaymentMappingService {
 
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
-        applyHeaders(to: &req)
+        try await applyHeaders(to: &req)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {

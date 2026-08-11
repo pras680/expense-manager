@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useReceipts } from '../hooks/useReceipts'
+import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { ReceiptCard } from '../components/ReceiptCard'
 import { StatTile } from '../components/StatTile'
 import { receiptMatches, reportingTotal } from '../lib/receiptShape'
 
 type FilterKey = 'all' | 'last30' | 'noDate'
+type OwnerFilter = 'everyone' | 'mine'
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'All' },
@@ -17,12 +19,15 @@ const FILTERS: { key: FilterKey; label: string }[] = [
 export function ReceiptsListPage() {
   const { receipts, loading, error, refresh } = useReceipts()
   const { defaultCurrency } = useSettings()
+  const { session } = useAuth()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterKey>('all')
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('everyone')
 
   const filtered = useMemo(() => {
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
     return receipts.filter((r) => {
+      if (ownerFilter === 'mine' && r.userId !== session?.userId) return false
       if (filter === 'last30') {
         if (!r.date) return false
         const t = new Date(r.date).getTime()
@@ -32,7 +37,7 @@ export function ReceiptsListPage() {
       }
       return receiptMatches(r, query)
     })
-  }, [receipts, filter, query])
+  }, [receipts, filter, query, ownerFilter, session?.userId])
 
   const totalSpend = useMemo(
     () => filtered.reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
@@ -84,7 +89,26 @@ export function ReceiptsListPage() {
         className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
       />
 
-      <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+      <div className="mt-3 flex gap-2">
+        {([
+          { key: 'everyone', label: 'Everyone' },
+          { key: 'mine', label: 'Only mine' }
+        ] as { key: OwnerFilter; label: string }[]).map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setOwnerFilter(f.key)}
+            className={`flex-1 rounded-full px-3 py-1.5 text-sm font-medium ${
+              ownerFilter === f.key
+                ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
+                : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
         {FILTERS.map((f) => (
           <button
             key={f.key}

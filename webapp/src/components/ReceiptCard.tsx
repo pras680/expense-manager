@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import type { Receipt } from '../types/receipt'
 import { CategoryBadge } from './CategoryBadge'
 import { reportingTotal, reportingCurrency } from '../lib/receiptShape'
+import { useSettings } from '../hooks/useSettings'
 
 function formatMoney(amount: number, currency: string) {
   try {
@@ -21,6 +22,11 @@ function formatDate(iso: string | null) {
 export function ReceiptCard({ receipt }: { receipt: Receipt }) {
   const total = reportingTotal(receipt)
   const currency = reportingCurrency(receipt)
+  const { nameFor } = useSettings()
+  // Only label other people's receipts — tagging every one of your own with
+  // "You" is noise on the screen you look at most.
+  const owner = nameFor(receipt.userId)
+  const showOwner = owner !== null && owner !== 'You'
 
   return (
     <Link
@@ -35,9 +41,19 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
           <span>{formatDate(receipt.date)}</span>
           {receipt.cardLast4 && <span>•••• {receipt.cardLast4}</span>}
         </div>
-        {receipt.category && (
-          <div className="mt-1.5">
-            <CategoryBadge category={receipt.category} />
+        {(receipt.category || showOwner || receipt.visibility === 'private') && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {receipt.category && <CategoryBadge category={receipt.category} />}
+            {showOwner && (
+              <span className="inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                {owner}
+              </span>
+            )}
+            {receipt.visibility === 'private' && (
+              <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+                Private
+              </span>
+            )}
           </div>
         )}
       </div>

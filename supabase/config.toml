@@ -1,0 +1,25 @@
+# Supabase project config.
+#
+# The only thing pinned here is per-function JWT verification, and it matters
+# more than it looks: both parse-receipt and process-sms-inbox read the caller's
+# role by base64-decoding the JWT payload WITHOUT verifying its signature. That
+# is only sound because Supabase's gateway has already verified it upstream.
+#
+# If verify_jwt were ever switched off for those functions, the role claim would
+# become attacker-controlled and both authorization checks could be forged by
+# hand-crafting a token. Keeping the setting in version control means it can't be
+# silently changed in the dashboard without the repo disagreeing.
+
+project_id = "expense-manager"
+
+[functions.parse-receipt]
+verify_jwt = true
+
+[functions.process-sms-inbox]
+verify_jwt = true
+
+# receive-sms is called by an iOS Shortcut, which cannot hold a Supabase JWT.
+# It authenticates instead with a per-user token from sms_ingest_tokens, checked
+# in the function body (see resolveOwner).
+[functions.receive-sms]
+verify_jwt = false

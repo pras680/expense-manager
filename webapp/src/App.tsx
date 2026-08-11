@@ -10,6 +10,7 @@ import { EditReceiptPage } from './pages/EditReceiptPage'
 import { ReportsOverviewPage } from './pages/ReportsOverviewPage'
 import { ReportsByCategoryPage } from './pages/ReportsByCategoryPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { SmsSetupPage } from './pages/SmsSetupPage'
 
 function AuthGate() {
   const { session, loading } = useAuth()
@@ -23,9 +24,13 @@ function AuthGate() {
   }
 
   return (
-    <BrowserRouter>
-      <ReceiptsProvider>
-        <SettingsProvider>
+    // key={session.userId} is load-bearing: without it, signing in as a second
+    // user without first passing through a null session would reuse the same
+    // provider instances, leaving the previous user's receipts and currency in
+    // state until something happened to refetch them.
+    <BrowserRouter key={session.userId}>
+      <SettingsProvider>
+        <ReceiptsProvider>
           <div
             className="min-h-dvh bg-neutral-50 dark:bg-neutral-950"
             style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
@@ -37,11 +42,12 @@ function AuthGate() {
               <Route path="/reports" element={<ReportsOverviewPage />} />
               <Route path="/reports/category/:category" element={<ReportsByCategoryPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+              <Route path="/settings/sms" element={<SmsSetupPage />} />
             </Routes>
           </div>
           <NavBar />
-        </SettingsProvider>
-      </ReceiptsProvider>
+        </ReceiptsProvider>
+      </SettingsProvider>
     </BrowserRouter>
   )
 }

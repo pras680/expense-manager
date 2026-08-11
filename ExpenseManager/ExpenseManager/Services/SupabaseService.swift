@@ -83,6 +83,8 @@ struct ParsedReceipt: Codable {
     var card_bank: String?
     var category: String?
     var line_items: [ParsedLineItem]?
+    /// "private" or "household". Nil means fall back to the column default.
+    var visibility: String?
 
     var cardLast4: String? {
         PaymentMappingService.normalizedLast4(from: card_last4) ?? PaymentMappingService.normalizedLast4(from: extracted_digits)
@@ -101,6 +103,17 @@ struct ReceiptLearningHint: Codable, Hashable {
     let correctedCurrency: String?
     let correctedCardLast4: String?
     let correctedCardBank: String?
+}
+
+enum SupabaseAuthError: LocalizedError {
+    case notAuthenticated
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthenticated:
+            return "Sign in to Supabase to load and save receipts."
+        }
+    }
 }
 
 struct SupabaseAuthSession: Codable, Equatable {
@@ -140,7 +153,6 @@ actor SupabaseService {
     let edgeFunctionBaseUrl: URL
     private let authCredentialStore: SupabaseCredentialStore
     private var authSession: SupabaseAuthSession?
-    private var useAnonymousAccess = true
 
     init(supabaseUrl: String, supabaseAnonKey: String, edgeFunctionBaseUrl: String) {
         self.supabaseUrl = URL(string: supabaseUrl)!
@@ -151,15 +163,14 @@ actor SupabaseService {
             account: URL(string: supabaseUrl)?.host ?? supabaseUrl
         )
         self.authSession = authCredentialStore.loadSession()
-        self.useAnonymousAccess = (self.authSession == nil)
     }
 
     func currentSession() -> SupabaseAuthSession? {
-        useAnonymousAccess ? nil : authSession
+        authSession
     }
 
+    /// Always returns a usable token, refreshing first when it is near expiry.
     func currentAccessToken() async -> String? {
-        guard !useAnonymousAccess else { return nil }
         try? await refreshAuthSessionIfNeeded()
         return authSession?.accessToken
     }
@@ -179,13 +190,11 @@ actor SupabaseService {
         ])
         let session = makeAuthSession(from: response, fallbackRefreshToken: response.refreshToken)
         authSession = session
-        useAnonymousAccess = false
         authCredentialStore.saveSession(session)
         return session
     }
 
     func signOut() {
-        useAnonymousAccess = true
         authSession = nil
         authCredentialStore.deleteSession()
     }
@@ -231,15 +240,16 @@ actor SupabaseService {
     }
 
     private func applySupabaseHeaders(to request: inout URLRequest, contentType: String? = nil, prefer: String? = nil) async throws {
-        if !useAnonymousAccess {
-            try await refreshAuthSessionIfNeeded()
+        try await refreshAuthSessionIfNeeded()
+        guard let accessToken = authSession?.accessToken else {
+            // Deliberately no anon-key fallback. Under per-user RLS the anon role
+            // can read nothing, so falling back would turn "you are signed out"
+            // into an empty receipts list — data that looks deleted rather than
+            // an app that asks you to sign in.
+            throw SupabaseAuthError.notAuthenticated
         }
         request.setValue(supabaseAnonKey, forHTTPHeaderField: "apikey")
-        if !useAnonymousAccess, let accessToken = authSession?.accessToken {
-            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        } else {
-            request.setValue("Bearer \(supabaseAnonKey)", forHTTPHeaderField: "Authorization")
-        }
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         if let contentType {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
@@ -285,22 +295,17 @@ actor SupabaseService {
             throw NSError(domain: "SupabaseStorage", code: 413, userInfo: [NSLocalizedDescriptionKey: "Upload failed: image is too large."])
         }
 
+        // The <uid>/ prefix is what the storage policies authorize against, so an
+        // unowned path can't be uploaded at all — no anon branch remains.
+        guard let userID = authSession?.userID else { throw SupabaseAuthError.notAuthenticated }
+
         let bucket = "receipt-documents"
         let safeFilename = AppSecurity.sanitizedStorageFilename(filename)
-        let objectPath: String
-        let url: URL
-        if let userID = authSession?.userID {
-            objectPath = "\(userID)/\(safeFilename)"
-            url = supabaseUrl.appendingPathComponent("storage/v1/object/")
-                .appendingPathComponent(bucket)
-                .appendingPathComponent(userID)
-                .appendingPathComponent(safeFilename)
-        } else {
-            objectPath = safeFilename
-            url = supabaseUrl.appendingPathComponent("storage/v1/object/")
-                .appendingPathComponent(bucket)
-                .appendingPathComponent(safeFilename)
-        }
+        let objectPath = "\(userID)/\(safeFilename)"
+        let url = supabaseUrl.appendingPathComponent("storage/v1/object/")
+            .appendingPathComponent(bucket)
+            .appendingPathComponent(userID)
+            .appendingPathComponent(safeFilename)
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -312,7 +317,10 @@ actor SupabaseService {
             throw AppSecurity.backendError(prefix: "Upload failed", statusCode: (response as? HTTPURLResponse)?.statusCode, data: data)
         }
 
-        return "\(supabaseUrl.absoluteString)/storage/v1/object/public/\(bucket)/\(objectPath)"
+        // Returns the object path, not a /object/public/ URL: the bucket is
+        // private, so those URLs no longer resolve. Anything displaying an image
+        // must sign the path first.
+        return objectPath
     }
 
     // Call Edge Function to parse raw_text using Anthropic (Edge Function hosted on Supabase)
@@ -352,13 +360,13 @@ actor SupabaseService {
     func fetchReceipts() async throws -> [Invoice] {
         do {
             return try await fetchReceipts(
-                selectColumns: "id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,default_currency,receipt_amount,receipt_currency,conversion_rate,converted_total,category"
+                selectColumns: "id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,default_currency,receipt_amount,receipt_currency,conversion_rate,converted_total,category,user_id,household_id,visibility"
             )
         } catch {
             guard isMissingColumnError(error) else { throw error }
             AppSecurity.debugLog("Optional receipt columns are missing in Supabase. Retrying fetch with legacy-compatible columns.")
             return try await fetchReceipts(
-                selectColumns: "id,merchant,date,total,currency,file_url,raw_ocr_json"
+                selectColumns: "id,merchant,date,total,currency,file_url,raw_ocr_json,user_id,household_id,visibility"
             )
         }
     }
@@ -664,12 +672,22 @@ actor SupabaseService {
         let cardLast4 = parsed.cardLast4
         let receiptAmount = parsed.receipt_amount ?? parsed.total
         let receiptCurrency = parsed.receipt_currency ?? parsed.currency
+        // user_id and household_id are NOT sent: the receipts_set_owner trigger
+        // stamps them from auth.uid(). This used to live in the optional-columns
+        // block below, which meant the legacy retry path silently dropped
+        // ownership whenever a schema-cache miss occurred.
+        //
+        // visibility stays in the base body rather than the optional block: the
+        // optional block is dropped wholesale on any missing-column error (and
+        // default_currency et al genuinely do not exist), so anything placed
+        // there would never actually be sent.
         var body: [String: Any] = [
             "merchant": jsonString(parsed.merchant),
             "date": jsonString(parsed.date),
             "total": jsonDecimal(parsed.total),
             "currency": jsonString(receiptCurrency),
             "file_url": jsonString(fileUrl),
+            "visibility": parsed.visibility ?? "household",
             "raw_ocr_json": [
                 "raw_text": rawText.map { AppSecurity.clippedSensitiveText($0) } ?? "",
                 "extracted_digits": parsed.extracted_digits ?? "",
@@ -694,9 +712,6 @@ actor SupabaseService {
             body["category"] = jsonString(parsed.category)
             body["card_last4"] = jsonString(cardLast4)
             body["card_bank"] = jsonString(parsed.card_bank)
-            if let userID = authSession?.userID {
-                body["user_id"] = userID
-            }
         }
 
         req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])

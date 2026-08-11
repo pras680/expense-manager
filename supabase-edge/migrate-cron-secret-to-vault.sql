@@ -42,7 +42,11 @@ select cron.schedule(
       ),
       'Content-Type', 'application/json'
     ),
-    body := '{}'::jsonb
+    body := '{}'::jsonb,
+    -- Without this, pg_net's 5s default aborts the call mid-flight: every tick
+    -- reports 'succeeded' (http_post only queues the request) while the response
+    -- is discarded and the invocation torn down, so nothing is ever drained.
+    timeout_milliseconds := 120000
   ) as request_id;
   $$
 );

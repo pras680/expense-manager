@@ -45,6 +45,8 @@ class ReceiptStore: ObservableObject {
     private let reviewedReceiptFingerprintsKey = "reviewedReceiptFingerprints"
     private let receiptCorrectionRulesKey = "receiptCorrectionRules"
     private let rejectedReceiptsKey = "rejectedReceipts"
+    /// Namespace for the per-user UserDefaults keys below. Nil before sign-in.
+    private var currentUserScopeID: String?
     private let maximumReviewedReceiptFingerprints = 500
     private let maximumReceiptCorrectionRules = 120
     private let maximumRejectedReceipts = 200
@@ -126,11 +128,18 @@ class ReceiptStore: ObservableObject {
             supabaseUrl: supabaseService.supabaseUrl.absoluteString,
             supabaseAnonKey: supabaseService.supabaseAnonKey
         )
-        self.gmailDailyAgentEnabled = UserDefaults.standard.bool(forKey: gmailDailyAgentEnabledKey)
-        self.gmailLastScanDate = UserDefaults.standard.object(forKey: gmailLastScanDateKey) as? Date
+        // Per-user state is intentionally NOT read here: no account is known at
+        // construction time. loadUserScopedState(for:) populates it once a
+        // session exists, and signOutFromSupabase clears it again.
+        self.gmailDailyAgentEnabled = false
+        self.gmailLastScanDate = nil
         self.defaultCurrencyCode = UserDefaults.standard.string(forKey: defaultCurrencyCodeKey) ?? Invoice.defaultCurrency
         self.supabaseSession = nil
-        self.rejectedReceipts = Self.loadRejectedReceiptsFromDisk()
+        self.rejectedReceipts = []
+        let service = supabaseService
+        Task { [paymentMappingService] in
+            await paymentMappingService.setTokenProvider { await service.currentAccessToken() }
+        }
         self.gmailScanner.onProgress = { [weak self] message in
             Task { @MainActor in
                 AppSecurity.debugLog("Gmail agent progress updated.")
@@ -141,7 +150,7 @@ class ReceiptStore: ObservableObject {
     }
 
     var supabaseAuthTitle: String {
-        supabaseSession == nil ? "Supabase Anon Mode" : "Supabase Connected"
+        supabaseSession == nil ? "Not signed in" : "Signed in"
     }
 
     var supabaseAuthSubtitle: String {
@@ -151,7 +160,7 @@ class ReceiptStore: ObservableObject {
         if supabaseSession != nil {
             return "Signed in for RLS access"
         }
-        return "Using single-user anon RLS policies"
+        return "Sign in to load and save receipts"
     }
 
     var gmailScheduleSubtitle: String {
@@ -182,23 +191,86 @@ class ReceiptStore: ObservableObject {
     func refreshSupabaseSession() async {
         _ = await supabaseService.currentAccessToken()
         supabaseSession = await supabaseService.currentSession()
-        await paymentMappingService.setAuthAccessToken(supabaseSession?.accessToken)
+        if let userID = supabaseSession?.userID, userID != currentUserScopeID {
+            migrateLegacyUserScopedDefaultsIfNeeded(to: userID)
+            loadUserScopedState(for: userID)
+        }
     }
 
     func signInToSupabase(email: String, password: String) async throws {
         let session = try await supabaseService.signIn(email: email, password: password)
         supabaseSession = session
-        await paymentMappingService.setAuthAccessToken(session.accessToken)
-        statusMessage = "Supabase connected. Loading receipts..."
+        migrateLegacyUserScopedDefaultsIfNeeded(to: session.userID)
+        loadUserScopedState(for: session.userID)
+        statusMessage = "Signed in. Loading receipts..."
         await loadReceipts()
     }
 
     func signOutFromSupabase() async {
         await supabaseService.signOut()
         supabaseSession = nil
-        await paymentMappingService.setAuthAccessToken(nil)
-        statusMessage = "Using single-user anon access. Loading receipts..."
-        await loadReceipts()
+
+        // Everything below belonged to the person signing out. Leaving any of it
+        // behind would leak into the next account on a shared device: their
+        // rejected receipts would suppress someone else's, their correction rules
+        // would be uploaded as learning hints on someone else's parses, and their
+        // Gmail watermark would make the next person skip mail they never saw.
+        await gmailScanner.signOut()
+        clearInMemoryUserState()
+
+        statusMessage = "Signed out."
+    }
+
+    /// In-memory state that must not survive an account switch.
+    private func clearInMemoryUserState() {
+        invoices = []
+        paymentMethods = []
+        pendingReceiptQueue = []
+        pendingReceipt = nil
+        rejectedReceipts = []
+        // Reviewed fingerprints and correction rules are read from UserDefaults
+        // on demand rather than held in memory, so dropping the scope is what
+        // detaches them — there is nothing in-memory to clear.
+        currentUserScopeID = nil
+    }
+
+    /// Per-user UserDefaults key.
+    ///
+    /// These five keys hold data that is specific to one person — Gmail scan
+    /// watermarks, rejected receipts (including full raw OCR text), reviewed
+    /// fingerprints, and learned correction rules. Unnamespaced, they leak
+    /// between accounts on a shared device: one person's rejections suppress
+    /// another's receipts, and their correction rules get uploaded as learning
+    /// hints on someone else's parses.
+    private func scopedKey(_ base: String) -> String {
+        guard let id = currentUserScopeID else { return base }
+        return "\(id).\(base)"
+    }
+
+    /// Copies pre-multi-user keys into the first account to sign in, so the
+    /// existing device's history isn't orphaned by the namespacing.
+    private func migrateLegacyUserScopedDefaultsIfNeeded(to userID: String) {
+        let defaults = UserDefaults.standard
+        let migratedFlag = "didMigrateUserScopedDefaults"
+        guard !defaults.bool(forKey: migratedFlag) else { return }
+
+        for base in [gmailDailyAgentEnabledKey, gmailLastScanDateKey, gmailLastDailyRunDateKey,
+                     reviewedReceiptFingerprintsKey, receiptCorrectionRulesKey, rejectedReceiptsKey] {
+            let scoped = "\(userID).\(base)"
+            if defaults.object(forKey: scoped) == nil, let legacy = defaults.object(forKey: base) {
+                defaults.set(legacy, forKey: scoped)
+            }
+            defaults.removeObject(forKey: base)
+        }
+        defaults.set(true, forKey: migratedFlag)
+    }
+
+    /// Rebinds all per-user state to the signed-in account.
+    private func loadUserScopedState(for userID: String) {
+        currentUserScopeID = userID
+        gmailDailyAgentEnabled = UserDefaults.standard.bool(forKey: scopedKey(gmailDailyAgentEnabledKey))
+        gmailLastScanDate = UserDefaults.standard.object(forKey: scopedKey(gmailLastScanDateKey)) as? Date
+        rejectedReceipts = loadRejectedReceiptsFromDisk()
     }
 
     func setDefaultCurrency(_ currency: String) {
@@ -424,7 +496,7 @@ class ReceiptStore: ObservableObject {
         } catch {
             invoices = []
             await loadPaymentMethods()
-            statusMessage = "Unable to load receipts. Check anon RLS policies and backend access."
+            statusMessage = "Unable to load receipts. Check your connection, or sign in again."
             AppSecurity.debugLog("Fetch receipts failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
         }
 
@@ -488,7 +560,7 @@ class ReceiptStore: ObservableObject {
 
     func setGmailDailyAgentEnabled(_ enabled: Bool) {
         gmailDailyAgentEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: gmailDailyAgentEnabledKey)
+        UserDefaults.standard.set(enabled, forKey: scopedKey(gmailDailyAgentEnabledKey))
         gmailScanSummary = enabled ? "Daily Gmail + SMS inbox scan enabled." : "Daily Gmail + SMS inbox scan disabled."
         statusMessage = gmailScanSummary
 
@@ -511,7 +583,7 @@ class ReceiptStore: ObservableObject {
         GmailBackgroundScheduler.scheduleDailyScan()
         guard !gmailAgentIsRunning else { return }
 
-        if let lastRun = UserDefaults.standard.object(forKey: gmailLastDailyRunDateKey) as? Date,
+        if let lastRun = UserDefaults.standard.object(forKey: scopedKey(gmailLastDailyRunDateKey)) as? Date,
            calendar.isDateInToday(lastRun) {
             return
         }
@@ -520,10 +592,18 @@ class ReceiptStore: ObservableObject {
     }
 
     func runAutonomousDailyGmailScanFromBackground() async -> Bool {
+        // A background scan runs with whatever session happens to be on the
+        // device. Without this guard, a signed-out (or stale) app would file the
+        // previous account's Gmail receipts under nobody, or under whoever signs
+        // in next.
+        guard supabaseSession != nil else {
+            AppSecurity.debugLog("Background Gmail scan skipped: not signed in.")
+            return false
+        }
         guard gmailDailyAgentEnabled else { return false }
         guard !gmailAgentIsRunning else { return true }
 
-        if let lastRun = UserDefaults.standard.object(forKey: gmailLastDailyRunDateKey) as? Date,
+        if let lastRun = UserDefaults.standard.object(forKey: scopedKey(gmailLastDailyRunDateKey)) as? Date,
            calendar.isDateInToday(lastRun) {
             return true
         }
@@ -635,13 +715,13 @@ class ReceiptStore: ObservableObject {
 
             if let latestIdentifiedEmailDate = result.latestIdentifiedEmailDate {
                 gmailLastScanDate = latestIdentifiedEmailDate
-                UserDefaults.standard.set(latestIdentifiedEmailDate, forKey: gmailLastScanDateKey)
+                UserDefaults.standard.set(latestIdentifiedEmailDate, forKey: scopedKey(gmailLastScanDateKey))
                 AppSecurity.debugLog("Gmail last scan marker updated to latest identified email date: \(displayDateForDebug(latestIdentifiedEmailDate))")
             } else {
                 AppSecurity.debugLog("Gmail last scan marker unchanged because no receipt-like email was identified.")
             }
             if scheduled {
-                UserDefaults.standard.set(Date(), forKey: gmailLastDailyRunDateKey)
+                UserDefaults.standard.set(Date(), forKey: scopedKey(gmailLastDailyRunDateKey))
             }
 
             // Agent runs also read the Supabase SMS inbox (source of truth, populated by the
@@ -1019,7 +1099,7 @@ class ReceiptStore: ObservableObject {
     }
 
     private func loadReceiptCorrectionRules() -> [ReceiptCorrectionRule] {
-        guard let data = UserDefaults.standard.data(forKey: receiptCorrectionRulesKey) else {
+        guard let data = UserDefaults.standard.data(forKey: scopedKey(receiptCorrectionRulesKey)) else {
             return []
         }
         do {
@@ -1033,7 +1113,7 @@ class ReceiptStore: ObservableObject {
     private func saveReceiptCorrectionRules(_ rules: [ReceiptCorrectionRule]) {
         do {
             let data = try JSONEncoder().encode(rules)
-            UserDefaults.standard.set(data, forKey: receiptCorrectionRulesKey)
+            UserDefaults.standard.set(data, forKey: scopedKey(receiptCorrectionRulesKey))
         } catch {
             AppSecurity.debugLog("Failed to persist receipt correction rules: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
         }
@@ -1094,14 +1174,14 @@ class ReceiptStore: ObservableObject {
 
         do {
             let data = try JSONEncoder().encode(fingerprints)
-            UserDefaults.standard.set(data, forKey: reviewedReceiptFingerprintsKey)
+            UserDefaults.standard.set(data, forKey: scopedKey(reviewedReceiptFingerprintsKey))
         } catch {
             AppSecurity.debugLog("Failed to persist reviewed receipt fingerprint: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
         }
     }
 
     private func loadReviewedReceiptFingerprints() -> [ReviewedReceiptFingerprint] {
-        guard let data = UserDefaults.standard.data(forKey: reviewedReceiptFingerprintsKey) else {
+        guard let data = UserDefaults.standard.data(forKey: scopedKey(reviewedReceiptFingerprintsKey)) else {
             return []
         }
         do {
@@ -1112,8 +1192,8 @@ class ReceiptStore: ObservableObject {
         }
     }
 
-    private static func loadRejectedReceiptsFromDisk() -> [RejectedReceipt] {
-        guard let data = UserDefaults.standard.data(forKey: "rejectedReceipts") else {
+    private func loadRejectedReceiptsFromDisk() -> [RejectedReceipt] {
+        guard let data = UserDefaults.standard.data(forKey: scopedKey(rejectedReceiptsKey)) else {
             return []
         }
         do {
@@ -1127,7 +1207,7 @@ class ReceiptStore: ObservableObject {
     private func persistRejectedReceipts() {
         do {
             let data = try JSONEncoder().encode(rejectedReceipts)
-            UserDefaults.standard.set(data, forKey: rejectedReceiptsKey)
+            UserDefaults.standard.set(data, forKey: scopedKey(rejectedReceiptsKey))
         } catch {
             AppSecurity.debugLog("Failed to persist rejected receipts: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
         }
@@ -1467,113 +1547,19 @@ class ReceiptStore: ObservableObject {
         }
     }
 
+    /// The process-sms-inbox cron job is now the sole drainer of sms_inbox.
+    ///
+    /// This used to pull pending (and failed) rows and mark them itself, without
+    /// the `processing` claim the cron uses — so app and cron raced for the same
+    /// message and could each turn it into a receipt. Draining here also made
+    /// ownership depend on who won: the app attributes to the signed-in user,
+    /// while the cron attributes to whoever owns the SMS token it arrived on.
+    ///
+    /// The inbox counts below stay, so the screen still reports what is queued.
     func importSMSFromInbox() async {
-        guard !isProcessing else {
-            smsInboxFetchLog = "SMS inbox scan ignored because another scan is already running."
-            AppSecurity.debugLog(smsInboxFetchLog ?? "SMS inbox scan ignored.")
-            return
-        }
-
-        isProcessing = true
-        statusMessage = "Checking SMS inbox..."
-        smsInboxFetchLog = "Checking SMS inbox..."
-        AppSecurity.debugLog("SMS inbox scan started.")
-
-        defer {
-            isProcessing = false
-            AppSecurity.debugLog("SMS inbox scan finished. status=\(statusMessage ?? "none")")
-        }
-
-        do {
-            let rows = try await supabaseService.fetchPendingSMSInbox()
-            smsInboxFetchLog = "SMS inbox returned \(rows.count) pending message\(rows.count == 1 ? "" : "s")."
-            AppSecurity.debugLog(smsInboxFetchLog ?? "")
-            guard !rows.isEmpty else {
-                statusMessage = "No new SMS inbox messages to import."
-                smsInboxFetchLog = statusMessage
-                return
-            }
-
-            let result = await processSMSInboxRows(rows)
-            applySMSImportStatus(result, source: "SMS inbox", noMessagesFallback: "No SMS inbox expenses found.")
-            smsInboxFetchLog = statusMessage
-        } catch {
-            statusMessage = AppSecurity.safeUserMessage(for: error, fallback: "Could not read the SMS inbox. Please try again.")
-            smsInboxFetchLog = statusMessage
-            AppSecurity.debugLog("SMS inbox scan failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
-        }
+        statusMessage = "SMS messages are imported automatically in the background."
+        smsInboxFetchLog = statusMessage
         await refreshSMSInboxCounts()
-    }
-
-    /// Runs each pending inbox row through the expense pipeline and marks it processed/skipped/failed
-    /// so a re-scan never imports the same SMS twice.
-    private func processSMSInboxRows(_ rows: [SupabaseService.SMSInboxRow], presentImmediately: Bool = true) async -> SMSImportResult {
-        var result = SMSImportResult()
-
-        for (index, row) in rows.enumerated() {
-            let smsText = AppSecurity.clippedSensitiveText(row.body, limit: AppSecurity.maxSharedTextCharacters)
-            guard !smsText.isEmpty else {
-                await markSMSInboxSafely(row.id, status: "skipped", errorMessage: "Empty body")
-                result.skipped += 1
-                continue
-            }
-
-            AppSecurity.debugLog("SMS inbox message scanned #\(index + 1).")
-
-            guard InvoiceParser.looksLikeExpenseSMS(text: smsText) else {
-                await markSMSInboxSafely(row.id, status: "skipped", errorMessage: nil)
-                result.skipped += 1
-                AppSecurity.debugLog("SMS inbox skipped #\(index + 1), reason=not an expense alert.")
-                continue
-            }
-            result.eligible += 1
-
-            do {
-                var invoice = try await invoiceFromExtractedText("SMS Expense Alert:\n\(smsText)")
-                if invoice.date == nil {
-                    invoice.date = row.receivedAt ?? Date()
-                }
-
-                let reversal = await applyReversalIfPresent(for: invoice, source: "SMS inbox")
-                if reversal.isReversal {
-                    result.reversals += 1
-                    if reversal.removedOriginal {
-                        result.reversalsMatched += 1
-                    }
-                    rememberReviewedReceipt(invoice, action: "reversal-processed")
-                    await markSMSInboxSafely(row.id, status: "processed", errorMessage: nil)
-                    AppSecurity.debugLog("SMS inbox reversal handled #\(index + 1), removedOriginal=\(reversal.removedOriginal).")
-                    continue
-                }
-
-                if hasLikelyDuplicate(for: invoice) {
-                    result.skipped += 1
-                    await markSMSInboxSafely(row.id, status: "skipped", errorMessage: "Likely duplicate")
-                    AppSecurity.debugLog("SMS inbox duplicate skipped #\(index + 1).")
-                    continue
-                }
-
-                enqueuePendingReceipt(invoice: invoice, imageData: nil, presentImmediately: presentImmediately)
-                result.imported += 1
-                result.lastImported = invoice
-                await markSMSInboxSafely(row.id, status: "processed", errorMessage: nil)
-                AppSecurity.debugLog("SMS inbox identified #\(index + 1).")
-            } catch {
-                result.skipped += 1
-                await markSMSInboxSafely(row.id, status: "failed", errorMessage: AppSecurity.redactedDiagnostic(error.localizedDescription))
-                AppSecurity.debugLog("SMS inbox parse failed #\(index + 1): \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
-            }
-        }
-
-        return result
-    }
-
-    private func markSMSInboxSafely(_ id: UUID, status: String, errorMessage: String?) async {
-        do {
-            try await supabaseService.markSMSInbox(id: id, status: status, receiptId: nil, errorMessage: errorMessage)
-        } catch {
-            AppSecurity.debugLog("Failed to update sms_inbox row \(id): \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
-        }
     }
 
     private struct AgentSMSInboxResult {
@@ -1590,33 +1576,13 @@ class ReceiptStore: ObservableObject {
 
     /// Reads pending SMS inbox rows as part of an agent scan run. Silent and non-throwing:
     /// returns counts and log lines so the caller can fold them into its summary.
+    /// No longer drains the inbox — see importSMSFromInbox(). Reports what the
+    /// cron has queued so the agent summary stays truthful.
     private func scanSMSInboxForAgent(presentImmediately: Bool) async -> AgentSMSInboxResult {
+        _ = presentImmediately
         var out = AgentSMSInboxResult()
-        out.attempted = true
-        do {
-            let rows = try await supabaseService.fetchPendingSMSInbox()
-            out.messagesRead = rows.count
-            guard !rows.isEmpty else {
-                out.logLines.append("No new SMS inbox messages found.")
-                return out
-            }
-
-            let result = await processSMSInboxRows(rows, presentImmediately: presentImmediately)
-            out.imported = result.imported
-            out.skipped = result.skipped
-            out.reversals = result.reversals
-            out.reversalsMatched = result.reversalsMatched
-            out.lastImported = result.lastImported
-            out.logLines.append("SMS inbox messages read: \(rows.count)")
-            out.logLines.append("New SMS inbox receipts queued: \(result.imported)\(result.skipped > 0 ? ", skipped \(result.skipped)" : "").")
-            if result.reversals > 0 {
-                out.logLines.append("SMS inbox reversals: \(result.reversals) (matched \(result.reversalsMatched) original charge\(result.reversalsMatched == 1 ? "" : "s")).")
-            }
-        } catch {
-            out.errorMessage = AppSecurity.safeUserMessage(for: error, fallback: "SMS inbox scan could not complete.")
-            AppSecurity.debugLog("Agent SMS inbox scan failed: \(AppSecurity.redactedDiagnostic(error.localizedDescription))")
-            out.logLines.append("SMS inbox scan error: \(out.errorMessage ?? "unknown")")
-        }
+        out.attempted = false
+        out.logLines.append("SMS inbox is imported automatically in the background.")
         return out
     }
 

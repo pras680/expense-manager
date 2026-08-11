@@ -1,15 +1,49 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 }
 
 html, body, #root {
   height: 100%;
 }
 
+/* A base colour pair has to live here, not only on Tailwind utility classes.
+   Without it the browser's default near-black text renders on the dark-mode
+   background — every input looks empty even when it holds a value, which reads
+   as "the data didn't load" rather than "the text is invisible". */
 body {
   margin: 0;
   overscroll-behavior-y: none;
   -webkit-font-smoothing: antialiased;
+  color: #171717;            /* neutral-900 */
+  background-color: #fafafa; /* neutral-50  */
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    color: #fafafa;            /* neutral-50  */
+    background-color: #0a0a0a; /* neutral-950 */
+  }
+}
+
+/* Form controls don't inherit colour from their parent by default, so they need
+   saying explicitly. These are element selectors, so any Tailwind text-* class
+   on a specific control still wins. */
+input,
+textarea,
+select {
+  color: inherit;
+}
+
+/* Placeholders must stay distinguishable from real input in both themes —
+   otherwise a placeholder reads as a filled value. */
+::placeholder {
+  color: #737373; /* neutral-500 */
+  opacity: 1;
+}
+
+/* Safari renders date/time inputs with a hardcoded dark glyph colour. */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.5);
 }

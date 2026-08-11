@@ -91,3 +91,27 @@ export function saveSession(session: Session): void {
 export function clearSession(): void {
   localStorage.removeItem(STORAGE_KEY)
 }
+
+/**
+ * Revokes the refresh token server-side, then clears local state.
+ *
+ * Dropping the localStorage entry alone leaves the refresh token valid until it
+ * expires naturally — so a copy taken from a shared browser would still mint new
+ * access tokens long after the user thought they had signed out.
+ */
+export async function signOutEverywhere(session: Session | null): Promise<void> {
+  if (session?.accessToken) {
+    try {
+      await fetch(`${env.supabaseUrl}/auth/v1/logout`, {
+        method: 'POST',
+        headers: {
+          apikey: env.supabaseAnonKey,
+          Authorization: `Bearer ${session.accessToken}`
+        }
+      })
+    } catch {
+      // Best effort — a network failure must not trap the user in a signed-in UI.
+    }
+  }
+  clearSession()
+}

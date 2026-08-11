@@ -4,6 +4,7 @@ import PhotosUI
 struct MainTabView: View {
     @StateObject var store: ReceiptStore
     @State private var selectedTab: AppTab = .receipts
+    @State private var didRestoreSession = false
 
     enum AppTab: Hashable {
         case receipts
@@ -12,6 +13,30 @@ struct MainTabView: View {
     }
 
     var body: some View {
+        Group {
+            if !didRestoreSession {
+                // Avoid flashing the sign-in screen before the Keychain session
+                // has been restored on a cold launch.
+                ProgressView().controlSize(.large)
+            } else if store.supabaseSession == nil {
+                // Under per-user RLS an unauthenticated app can read nothing, so
+                // showing the full UI would just render empty screens and opaque
+                // errors. Gate on sign-in instead.
+                SupabaseSignInView(store: store)
+            } else {
+                signedInContent
+            }
+        }
+        .task {
+            await store.refreshSupabaseSession()
+            didRestoreSession = true
+            guard store.supabaseSession != nil else { return }
+            await store.loadReceipts()
+            store.configureGmailBackgroundSchedule()
+        }
+    }
+
+    private var signedInContent: some View {
         TabView(selection: $selectedTab) {
             ReceiptsDashboardView(store: store, onShowReport: {
                 selectedTab = .reports
@@ -40,11 +65,6 @@ struct MainTabView: View {
             .tag(AppTab.tools)
         }
         .tint(AppTheme.accent)
-        .task {
-            await store.refreshSupabaseSession()
-            await store.loadReceipts()
-            store.configureGmailBackgroundSchedule()
-        }
         .fullScreenCover(isPresented: $store.showScanner) {
             DocumentScanner { result in
                 Task { await store.processScannerResult(result) }
@@ -70,7 +90,7 @@ struct MainTabView: View {
             })
         }
         .sheet(isPresented: $store.showSupabaseSignIn) {
-            SupabaseSignInView(store: store)
+            SupabaseSignInView(store: store, isDismissable: true)
         }
     }
 }
@@ -178,7 +198,7 @@ private struct ToolsView: View {
                 SectionLabel(text: "Backend Checklist")
                 RuledStack {
                     RuledRow { checklistRow("Edge Function deployed", detail: "/functions/v1/parse-receipt") }
-                    RuledRow { checklistRow("Receipts table policies", detail: "Allow anon insert/select or add app auth") }
+                    RuledRow { checklistRow("Receipts table policies", detail: "Per-user + household RLS, signed-in access only") }
                     RuledRow { checklistRow("Storage bucket policy", detail: "Allow uploads to receipt-documents") }
                     RuledRow { checklistRow("Google OAuth configured", detail: "iOS client ID + Gmail read-only scope") }
                 }

@@ -35,7 +35,8 @@ export function EditReceiptPage() {
     cardLast4: receipt.cardLast4 || '',
     cardBank: receipt.cardBank || '',
     rawText: receipt.rawText,
-    fileUrl: receipt.fileUrl
+    fileUrl: receipt.fileUrl,
+    visibility: receipt.visibility
   }
 
   async function handleSubmit(input: ReceiptWriteInput) {

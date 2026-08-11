@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 
 export function SignInPage() {
-  const { signIn } = useAuth()
+  const { signIn, expiredMessage } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -28,6 +28,14 @@ export function SignInPage() {
         <p className="mt-1 text-center text-sm text-neutral-500 dark:text-neutral-400">
           Sign in with your household account.
         </p>
+
+        {/* Explains an involuntary sign-out, rather than silently dumping the
+            user back here with no idea why their session ended. */}
+        {expiredMessage && !error && (
+          <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            {expiredMessage}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
           {error && (

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ReceiptForm, type ReceiptFormValues } from '../components/ReceiptForm'
 import { useReceipts } from '../hooks/useReceipts'
+import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import {
   insertReceipt,
@@ -27,7 +28,8 @@ function valuesFromParsed(parsed: ParsedReceipt, rawText: string, fileUrl: strin
     cardLast4: parsed.card_last4 || '',
     cardBank: parsed.card_bank || '',
     rawText,
-    fileUrl
+    fileUrl,
+    visibility: 'household'
   }
 }
 
@@ -41,13 +43,15 @@ function emptyFormValues(rawText: string, fileUrl: string | null = null): Receip
     cardLast4: '',
     cardBank: '',
     rawText,
-    fileUrl
+    fileUrl,
+    visibility: 'household'
   }
 }
 
 export function AddReceiptPage() {
   const navigate = useNavigate()
   const { refresh } = useReceipts()
+  const { session } = useAuth()
   const { defaultCurrency } = useSettings()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -75,7 +79,9 @@ export function AddReceiptPage() {
       setBusyLabel('Reading receipt…')
       const base64 = await blobToBase64(compressed)
       const [fileUrl, parsed] = await Promise.all([
-        uploadReceiptImage(compressed, file.name || 'receipt.jpg'),
+        // The uid prefix is what the storage policies authorize against, so the
+        // upload cannot be attributed after the fact — it has to be passed here.
+        uploadReceiptImage(compressed, file.name || 'receipt.jpg', session!.userId),
         parseReceiptImage(base64, 'image/jpeg').catch((err) => {
           setError(err instanceof Error ? err.message : String(err))
           return null

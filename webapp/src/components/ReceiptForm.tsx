@@ -3,6 +3,7 @@ import { EXPENSE_CATEGORIES, COMMON_CURRENCIES } from '../lib/categories'
 import { convertCurrency } from '../lib/currency'
 import { findPaymentMethod } from '../lib/supabaseClient'
 import type { ReceiptWriteInput } from '../lib/supabaseClient'
+import type { ReceiptVisibility } from '../types/receipt'
 
 export interface ReceiptFormValues {
   merchant: string
@@ -14,6 +15,7 @@ export interface ReceiptFormValues {
   cardBank: string
   rawText: string
   fileUrl: string | null
+  visibility: ReceiptVisibility
 }
 
 interface ReceiptFormProps {
@@ -79,7 +81,8 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
         cardLast4: values.cardLast4 ? values.cardLast4.replace(/[^0-9]/g, '').slice(-4) : null,
         cardBank: values.cardBank || null,
         rawText: values.rawText,
-        fileUrl: values.fileUrl
+        fileUrl: values.fileUrl,
+        visibility: values.visibility
       }
 
       await onSubmit(input)
@@ -188,6 +191,41 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
             placeholder="Optional"
           />
         </label>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Visibility</span>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => set('visibility', 'household')}
+            aria-pressed={values.visibility === 'household'}
+            className={`flex-1 rounded-lg py-2.5 text-sm font-medium ${
+              values.visibility === 'household'
+                ? 'bg-teal-700 text-white'
+                : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+            }`}
+          >
+            Household
+          </button>
+          <button
+            type="button"
+            onClick={() => set('visibility', 'private')}
+            aria-pressed={values.visibility === 'private'}
+            className={`flex-1 rounded-lg py-2.5 text-sm font-medium ${
+              values.visibility === 'private'
+                ? 'bg-amber-600 text-white'
+                : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+            }`}
+          >
+            Private
+          </button>
+        </div>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          {values.visibility === 'household'
+            ? 'Everyone in your household can see and edit this receipt.'
+            : 'Only you can see this receipt. It is excluded from household totals for everyone else.'}
+        </p>
       </div>
 
       <button

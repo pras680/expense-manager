@@ -19,6 +19,11 @@ struct Invoice: Identifiable, Codable {
     var cardBank: String? = nil
     var rawText: String = ""
     var fileUrl: String? = nil
+    /// Set server-side by the receipts_set_owner trigger; never written by the client.
+    var userId: String? = nil
+    var householdId: String? = nil
+    /// "private" (owner only) or "household" (shared with, and editable by, members).
+    var visibility: String = "household"
 }
 
 extension Invoice {
@@ -83,7 +88,12 @@ extension Invoice {
             cardLast4: last4,
             cardBank: parsed.card_bank,
             rawText: rawText,
-            fileUrl: fileUrl
+            fileUrl: fileUrl,
+            // Ownership is unknown at parse time — the server assigns it on
+            // insert, and the row is re-read from the DB afterwards.
+            userId: nil,
+            householdId: nil,
+            visibility: parsed.visibility ?? "household"
         )
     }
 
@@ -103,6 +113,11 @@ extension Invoice {
         let category = dictionary["category"] as? String ?? Invoice.stringValue(from: rawJSON?["category"])
         let cardLast4 = dictionary["card_last4"] as? String ?? Invoice.stringValue(from: rawJSON?["card_last4"])
         let cardBank = dictionary["card_bank"] as? String ?? Invoice.stringValue(from: rawJSON?["card_bank"])
+        let userId = dictionary["user_id"] as? String
+        let householdId = dictionary["household_id"] as? String
+        // Default to shared, matching the column default — a row that predates
+        // the column must not silently vanish from the household's view.
+        let visibility = (dictionary["visibility"] as? String) == "private" ? "private" : "household"
 
         let storedTotal = Invoice.decimalValue(from: dictionary["total"])
         let receiptAmount = Invoice.decimalValue(from: dictionary["receipt_amount"])
@@ -132,7 +147,10 @@ extension Invoice {
             cardLast4: cardLast4,
             cardBank: cardBank,
             rawText: rawText,
-            fileUrl: fileUrl
+            fileUrl: fileUrl,
+            userId: userId,
+            householdId: householdId,
+            visibility: visibility
         )
     }
 

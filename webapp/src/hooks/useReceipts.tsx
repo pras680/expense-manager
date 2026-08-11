@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { Receipt } from '../types/receipt'
-import { listReceipts } from '../lib/supabaseClient'
+import { listReceipts, AuthRequiredError } from '../lib/supabaseClient'
 
 interface ReceiptsContextValue {
   receipts: Receipt[]
@@ -24,7 +24,14 @@ export function ReceiptsProvider({ children }: { children: ReactNode }) {
       rows.sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
       setReceipts(rows)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      // An expired session is already being handled by AuthProvider, which is
+      // tearing this tree down and showing the sign-in screen. Surfacing it here
+      // too would flash a scary error banner on the way out.
+      if (err instanceof AuthRequiredError) {
+        setReceipts([])
+      } else {
+        setError(err instanceof Error ? err.message : String(err))
+      }
     } finally {
       setLoading(false)
     }

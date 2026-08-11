@@ -2,7 +2,10 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+// Legacy shared secret + the user it maps to. Both exist only for the migration
+// window; see resolveOwner().
 const SMS_INGEST_SECRET = Deno.env.get('SMS_INGEST_SECRET')
+const LEGACY_SMS_USER_ID = Deno.env.get('LEGACY_SMS_USER_ID')
 const MAX_BODY_CHARS = 8_000
 
 const corsHeaders = {
@@ -21,19 +24,19 @@ serve(async (req) => {
     return jsonResponse({ error: 'Method not allowed' }, 405, { Allow: 'POST, OPTIONS' })
   }
 
-  if (!SMS_INGEST_SECRET) {
-    console.error('SMS ingest secret is not configured.')
-    return jsonResponse({ error: 'SMS ingest is not configured' }, 500)
-  }
-
-  const providedSecret = req.headers.get('x-sms-ingest-secret') ?? ''
-  if (!timingSafeEqual(providedSecret, SMS_INGEST_SECRET)) {
-    return jsonResponse({ error: 'Unauthorized' }, 401)
-  }
-
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     console.error('Supabase Edge Function environment is incomplete.')
     return jsonResponse({ error: 'SMS ingest is not configured' }, 500)
+  }
+
+  // Which household member sent this? Each person's Shortcut carries their own
+  // token, so the token is the identity — there is no other signal in the
+  // payload that could distinguish them (`sender` is the *bank's* originator ID,
+  // identical for everyone).
+  const providedSecret = req.headers.get('x-sms-ingest-secret') ?? ''
+  const ownerUserId = await resolveOwner(providedSecret)
+  if (!ownerUserId) {
+    return jsonResponse({ error: 'Unauthorized' }, 401)
   }
 
   const contentType = req.headers.get('content-type') ?? ''
@@ -67,7 +70,8 @@ serve(async (req) => {
       received_at: receivedAt,
       body_hash: bodyHash,
       status: 'pending',
-      metadata
+      metadata,
+      user_id: ownerUserId
     }
 
     const insertUrl = `${SUPABASE_URL.replace(/\/$/, '')}/rest/v1/sms_inbox`
@@ -107,6 +111,64 @@ serve(async (req) => {
     return jsonResponse({ error: 'SMS ingest failed' }, 500)
   }
 })
+
+// Returns the owning user's id, or null if the caller isn't recognised.
+//
+// Two accepted credentials:
+//   1. A per-user token from sms_ingest_tokens (issued in-app). This is the
+//      target state — revocable per person, and it identifies the sender.
+//   2. The old shared SMS_INGEST_SECRET, attributed to LEGACY_SMS_USER_ID. This
+//      keeps the existing Shortcut working during the migration.
+//      REMOVE BOTH once every Shortcut carries a per-user token: delete this
+//      branch and unset SMS_INGEST_SECRET / LEGACY_SMS_USER_ID.
+async function resolveOwner(providedSecret: string): Promise<string | null> {
+  if (!providedSecret) return null
+
+  const tokenHash = await sha256Hex(providedSecret)
+  try {
+    const resp = await fetch(
+      `${SUPABASE_URL!.replace(/\/$/, '')}/rest/v1/sms_ingest_tokens` +
+      `?select=id,user_id&token_hash=eq.${tokenHash}&revoked_at=is.null&limit=1`,
+      {
+        headers: {
+          apikey: SUPABASE_SERVICE_ROLE_KEY!,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY!}`
+        }
+      }
+    )
+    if (resp.ok) {
+      const rows = await resp.json()
+      const match = Array.isArray(rows) ? rows[0] : null
+      if (match?.user_id) {
+        // Best-effort usage stamp; a failure here must not reject a valid SMS.
+        fetch(
+          `${SUPABASE_URL!.replace(/\/$/, '')}/rest/v1/sms_ingest_tokens?id=eq.${match.id}`,
+          {
+            method: 'PATCH',
+            headers: {
+              apikey: SUPABASE_SERVICE_ROLE_KEY!,
+              Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY!}`,
+              'Content-Type': 'application/json',
+              Prefer: 'return=minimal'
+            },
+            body: JSON.stringify({ last_used_at: new Date().toISOString() })
+          }
+        ).catch(() => {})
+        return match.user_id as string
+      }
+    } else {
+      console.error(`sms_ingest_tokens lookup failed: HTTP ${resp.status}`)
+    }
+  } catch (err) {
+    console.error(`sms_ingest_tokens lookup threw: ${err instanceof Error ? err.name : 'Unknown'}`)
+  }
+
+  if (SMS_INGEST_SECRET && LEGACY_SMS_USER_ID && timingSafeEqual(providedSecret, SMS_INGEST_SECRET)) {
+    return LEGACY_SMS_USER_ID
+  }
+
+  return null
+}
 
 function smsBodyFromPayload(payload: Record<string, unknown>) {
   return safeOptionalString(

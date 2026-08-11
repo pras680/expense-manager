@@ -13,7 +13,12 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-const BATCH_LIMIT = 25
+// Deliberately small. Each row makes a Gemini call via parse-receipt (seconds
+// each), and the caller is pg_net, which abandons the connection on timeout and
+// takes the whole invocation down with it. A batch of 25 could never finish, so
+// every tick timed out and nothing was ever drained. 5 keeps one invocation
+// comfortably inside the cron's timeout; a backlog just drains over more ticks.
+const BATCH_LIMIT = 5
 const MAX_BODY_CHARS = 8_000
 
 const corsHeaders = {
@@ -130,8 +135,17 @@ async function convertCurrency(
 
 // ---- Main handler ----
 
-type SMSInboxRow = { id: string; body: string; sender: string | null; received_at: string }
+type SMSInboxRow = {
+  id: string
+  body: string
+  sender: string | null
+  received_at: string
+  user_id: string | null
+}
 type RestHeaders = { apikey: string; Authorization: string; 'Content-Type': string }
+
+// Resolved once per owning user, then reused for every row that user owns.
+type OwnerContext = { userId: string; householdId: string | null; defaultCurrency: string }
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -171,12 +185,15 @@ serve(async (req) => {
 
   try {
     const rowsResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/sms_inbox?select=id,body,sender,received_at&status=eq.pending&order=received_at.asc&limit=${BATCH_LIMIT}`,
+      `${SUPABASE_URL}/rest/v1/sms_inbox?select=id,body,sender,received_at,user_id&status=eq.pending&order=received_at.asc&limit=${BATCH_LIMIT}`,
       { headers }
     )
     if (!rowsResp.ok) throw new Error(`Failed to fetch sms_inbox: HTTP ${rowsResp.status}`)
     const rows: SMSInboxRow[] = await rowsResp.json()
-    const defaultCurrency = await getDefaultCurrency(headers)
+
+    // This function runs as service_role and therefore bypasses RLS entirely —
+    // every query below has to scope itself by owner explicitly.
+    const ownerCache = new Map<string, OwnerContext>()
 
     for (const row of rows) {
       // Atomically claim the row (pending -> processing) so two overlapping
@@ -184,7 +201,22 @@ serve(async (req) => {
       const claimed = await claimRow(row.id, headers)
       if (!claimed) continue
 
-      const outcome = await processRow(row, headers, defaultCurrency)
+      if (!row.user_id) {
+        // Predates per-user ingest tokens, so there is no way to tell whose
+        // spending this is. Filing it under an arbitrary user would corrupt
+        // someone's totals — leave it visible and unprocessed instead.
+        await markRow(row.id, headers, 'skipped', 'No owner — predates per-user SMS tokens', null)
+        skipped++
+        continue
+      }
+
+      let owner = ownerCache.get(row.user_id)
+      if (!owner) {
+        owner = await loadOwnerContext(row.user_id, headers)
+        ownerCache.set(row.user_id, owner)
+      }
+
+      const outcome = await processRow(row, headers, owner)
       if (outcome === 'processed') processed++
       else if (outcome === 'failed') failed++
       else skipped++
@@ -197,15 +229,42 @@ serve(async (req) => {
   }
 })
 
-async function getDefaultCurrency(headers: RestHeaders): Promise<string> {
+// Currency and household now come from the SMS owner's own settings, replacing
+// the single global app_settings.default_currency row — otherwise one member's
+// currency preference would silently convert everyone else's spending.
+async function loadOwnerContext(userId: string, headers: RestHeaders): Promise<OwnerContext> {
+  const fallback: OwnerContext = { userId, householdId: null, defaultCurrency: 'SGD' }
   try {
-    const resp = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?select=value&key=eq.default_currency`, { headers })
-    if (!resp.ok) return 'SGD'
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/user_settings?select=default_currency,active_household_id&user_id=eq.${userId}&limit=1`,
+      { headers }
+    )
+    if (!resp.ok) return fallback
     const rows = await resp.json()
-    const value = rows?.[0]?.value
-    return typeof value === 'string' && value ? value : 'SGD'
+    const settings = Array.isArray(rows) ? rows[0] : null
+    if (!settings) return fallback
+
+    let householdId: string | null = settings.active_household_id ?? null
+    if (!householdId) {
+      const memberResp = await fetch(
+        `${SUPABASE_URL}/rest/v1/household_members?select=household_id&user_id=eq.${userId}&order=joined_at.asc&limit=1`,
+        { headers }
+      )
+      if (memberResp.ok) {
+        const memberRows = await memberResp.json()
+        householdId = memberRows?.[0]?.household_id ?? null
+      }
+    }
+
+    return {
+      userId,
+      householdId,
+      defaultCurrency: typeof settings.default_currency === 'string' && settings.default_currency
+        ? settings.default_currency
+        : 'SGD'
+    }
   } catch (_err) {
-    return 'SGD'
+    return fallback
   }
 }
 
@@ -242,8 +301,9 @@ async function markRow(
 async function processRow(
   row: SMSInboxRow,
   headers: RestHeaders,
-  defaultCurrency: string
+  owner: OwnerContext
 ): Promise<'processed' | 'skipped' | 'failed'> {
+  const defaultCurrency = owner.defaultCurrency
   const smsText = row.body.slice(0, MAX_BODY_CHARS).trim()
   if (!smsText) {
     await markRow(row.id, headers, 'skipped', 'Empty body', null)
@@ -301,8 +361,14 @@ async function processRow(
     if (normalizedLast4.length === 4) {
       cardLast4 = normalizedLast4
       try {
+        // Scoped to the owner's household: last_digits is only unique per
+        // household now, so an unscoped lookup could return another family's
+        // card and stamp the wrong bank on this receipt.
+        const householdFilter = owner.householdId
+          ? `&household_id=eq.${owner.householdId}`
+          : '&household_id=is.null'
         const pmResp = await fetch(
-          `${SUPABASE_URL}/rest/v1/payment_methods?select=id,last_digits,bank_name,card_name&last_digits=eq.${normalizedLast4}`,
+          `${SUPABASE_URL}/rest/v1/payment_methods?select=id,last_digits,bank_name,card_name&last_digits=eq.${normalizedLast4}${householdFilter}`,
           { headers }
         )
         if (pmResp.ok) {
@@ -321,18 +387,37 @@ async function processRow(
 
   const { rate, converted } = await convertCurrency(totalRaw, receiptCurrency, defaultCurrency, normalizedDate)
 
-  // Simplified duplicate guard: same total (+/- 0.01) within a 1-day window.
+  // Duplicate guard, scoped to the household and qualified by merchant.
+  //
+  // Household scope is what stops a shared family card double-counting: the same
+  // bank alert reaches both phones, each person's Shortcut files its own
+  // sms_inbox row (body_hash is unique per user now), but only the first one
+  // becomes a receipt.
+  //
+  // Merchant qualification matters just as much — amount-and-date alone matched
+  // any unrelated purchase of the same value on the same day, silently dropping
+  // legitimate receipts. That was tolerable for one user and is not for several.
   try {
     const d = new Date(normalizedDate)
     const from = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString()
     const to = new Date(d.getTime() + 24 * 60 * 60 * 1000).toISOString()
+    const scope = owner.householdId
+      ? `household_id=eq.${owner.householdId}`
+      : `user_id=eq.${owner.userId}`
     const dupResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/receipts?select=id&total=gte.${(converted - 0.01).toFixed(2)}&total=lte.${(converted + 0.01).toFixed(2)}&date=gte.${from}&date=lte.${to}&limit=1`,
+      `${SUPABASE_URL}/rest/v1/receipts?select=id,merchant&${scope}` +
+      `&total=gte.${(converted - 0.01).toFixed(2)}&total=lte.${(converted + 0.01).toFixed(2)}` +
+      `&date=gte.${from}&date=lte.${to}&limit=10`,
       { headers }
     )
     if (dupResp.ok) {
       const dupRows = await dupResp.json()
-      if (Array.isArray(dupRows) && dupRows.length > 0) {
+      const needle = merchant.toLowerCase()
+      const match = Array.isArray(dupRows) && dupRows.some((r: { merchant?: string | null }) => {
+        const other = (r.merchant ?? '').toLowerCase()
+        return other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))
+      })
+      if (match) {
         await markRow(row.id, headers, 'skipped', 'Likely duplicate', null)
         return 'skipped'
       }
@@ -355,13 +440,19 @@ async function processRow(
     line_items: []
   }
 
+  // Ownership is set explicitly rather than left to the receipts_set_owner
+  // trigger: that trigger falls back to auth.uid(), which is NULL here because
+  // this function runs as service_role, not as the SMS's owner.
   const baseInsertBody = {
     merchant,
     date: normalizedDate,
     total: converted,
     currency: defaultCurrency,
     file_url: null,
-    raw_ocr_json: rawOcrJson
+    raw_ocr_json: rawOcrJson,
+    user_id: owner.userId,
+    household_id: owner.householdId,
+    visibility: 'household'
   }
 
   // `receipts` doesn't actually have top-level receipt_amount/default_currency/

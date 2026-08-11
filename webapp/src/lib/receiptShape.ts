@@ -68,9 +68,19 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
     cardLast4,
     cardBank,
     rawText,
-    fileUrl: stringValue(row.file_url)
+    fileUrl: stringValue(row.file_url),
+    userId: stringValue(row.user_id),
+    householdId: stringValue(row.household_id),
+    // Default to 'household' to match the column default: a row that predates
+    // the column (or a legacy select that omits it) is shared, not silently
+    // hidden from the rest of the household.
+    visibility: stringValue(row.visibility) === 'private' ? 'private' : 'household'
   }
 }
+
+// Note: there is deliberately no canEditReceipt() helper. Household receipts are
+// co-managed and private ones are only visible to their owner, so anything a
+// user can see, they can edit — the RLS predicate is the same for both.
 
 export function reportingTotal(r: Receipt): number | null {
   return r.total ?? r.convertedTotal
