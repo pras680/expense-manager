@@ -11,6 +11,7 @@ import { ReportsOverviewPage } from './pages/ReportsOverviewPage'
 import { ReportsByCategoryPage } from './pages/ReportsByCategoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SmsSetupPage } from './pages/SmsSetupPage'
+import { GmailSetupPage } from './pages/GmailSetupPage'
 
 function AuthGate() {
   const { session, loading } = useAuth()
@@ -43,6 +44,9 @@ function AuthGate() {
               <Route path="/reports/category/:category" element={<ReportsByCategoryPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSetupPage />} />
+              <Route path="/settings/gmail" element={<GmailSetupPage />} />
+              {/* Google redirects here after consent; same component reads ?code= */}
+              <Route path="/settings/gmail/callback" element={<GmailSetupPage />} />
             </Routes>
           </div>
           <NavBar />

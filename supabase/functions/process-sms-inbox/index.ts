@@ -452,7 +452,11 @@ async function processRow(
     raw_ocr_json: rawOcrJson,
     user_id: owner.userId,
     household_id: owner.householdId,
-    visibility: 'household'
+    visibility: 'household',
+    source: 'sms',
+    // reviewed_at deliberately left null: this row was parsed by an LLM with
+    // nobody looking, so it surfaces in the app's "needs review" queue until a
+    // human confirms the merchant, amount and date are right.
   }
 
   // `receipts` doesn't actually have top-level receipt_amount/default_currency/

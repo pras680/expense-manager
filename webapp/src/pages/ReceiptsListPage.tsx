@@ -5,7 +5,8 @@ import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { ReceiptCard } from '../components/ReceiptCard'
 import { StatTile } from '../components/StatTile'
-import { receiptMatches, reportingTotal } from '../lib/receiptShape'
+import { receiptMatches, reportingTotal, needsReview } from '../lib/receiptShape'
+import { markReceiptsReviewed } from '../lib/supabaseClient'
 
 type FilterKey = 'all' | 'last30' | 'noDate'
 type OwnerFilter = 'everyone' | 'mine'
@@ -23,10 +24,30 @@ export function ReceiptsListPage() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterKey>('all')
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('everyone')
+  // Auto-imported receipts nobody has confirmed yet. These are the reason the
+  // banner exists: they were parsed by an LLM unattended, so amounts and dates
+  // can be wrong and the user needs a nudge to look.
+  const [onlyUnreviewed, setOnlyUnreviewed] = useState(false)
+  const [clearing, setClearing] = useState(false)
+
+  const unreviewed = useMemo(() => receipts.filter(needsReview), [receipts])
+
+  async function markAllReviewed() {
+    if (!session?.userId || unreviewed.length === 0) return
+    setClearing(true)
+    try {
+      await markReceiptsReviewed(unreviewed.map((r) => r.id), session.userId)
+      setOnlyUnreviewed(false)
+      await refresh()
+    } finally {
+      setClearing(false)
+    }
+  }
 
   const filtered = useMemo(() => {
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
     return receipts.filter((r) => {
+      if (onlyUnreviewed && !needsReview(r)) return false
       if (ownerFilter === 'mine' && r.userId !== session?.userId) return false
       if (filter === 'last30') {
         if (!r.date) return false
@@ -37,7 +58,7 @@ export function ReceiptsListPage() {
       }
       return receiptMatches(r, query)
     })
-  }, [receipts, filter, query, ownerFilter, session?.userId])
+  }, [receipts, filter, query, ownerFilter, session?.userId, onlyUnreviewed])
 
   const totalSpend = useMemo(
     () => filtered.reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
@@ -74,6 +95,32 @@ export function ReceiptsListPage() {
           Refresh
         </button>
       </div>
+
+      {unreviewed.length > 0 && (
+        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-700/60 dark:bg-amber-950/40">
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+            {unreviewed.length} new receipt{unreviewed.length === 1 ? '' : 's'} imported automatically
+          </p>
+          <p className="mt-0.5 text-xs text-amber-800 dark:text-amber-300/80">
+            Read from your SMS alerts and email. Check the amounts and dates are right.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <button
+              onClick={() => setOnlyUnreviewed((v) => !v)}
+              className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              {onlyUnreviewed ? 'Show all' : 'Review them'}
+            </button>
+            <button
+              onClick={markAllReviewed}
+              disabled={clearing}
+              className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-amber-900 disabled:opacity-60 dark:bg-neutral-900 dark:text-amber-200"
+            >
+              {clearing ? 'Marking…' : 'Mark all checked'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-3 flex gap-2">
         <StatTile label="Total" value={formatMoney(totalSpend)} />

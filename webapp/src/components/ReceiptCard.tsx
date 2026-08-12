@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { Receipt } from '../types/receipt'
 import { CategoryBadge } from './CategoryBadge'
-import { reportingTotal, reportingCurrency } from '../lib/receiptShape'
+import { reportingTotal, reportingCurrency, needsReview } from '../lib/receiptShape'
 import { useSettings } from '../hooks/useSettings'
 
 function formatMoney(amount: number, currency: string) {
@@ -27,11 +27,19 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
   // "You" is noise on the screen you look at most.
   const owner = nameFor(receipt.userId)
   const showOwner = owner !== null && owner !== 'You'
+  const unreviewed = needsReview(receipt)
+  const sourceLabel = receipt.source === 'sms' ? 'SMS'
+    : receipt.source === 'gmail' ? 'Email'
+    : receipt.source === 'photo' ? 'Photo' : null
 
   return (
     <Link
       to={`/receipts/${receipt.id}/edit`}
-      className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-4 py-3 active:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:active:bg-neutral-800"
+      className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 active:bg-neutral-50 dark:active:bg-neutral-800 ${
+        unreviewed
+          ? 'border-amber-400 bg-amber-50 dark:border-amber-600/60 dark:bg-amber-950/30'
+          : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900'
+      }`}
     >
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium text-neutral-900 dark:text-neutral-50">
@@ -41,9 +49,19 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
           <span>{formatDate(receipt.date)}</span>
           {receipt.cardLast4 && <span>•••• {receipt.cardLast4}</span>}
         </div>
-        {(receipt.category || showOwner || receipt.visibility === 'private') && (
+        {(receipt.category || showOwner || receipt.visibility === 'private' || sourceLabel || unreviewed) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {unreviewed && (
+              <span className="inline-block rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white">
+                Check
+              </span>
+            )}
             {receipt.category && <CategoryBadge category={receipt.category} />}
+            {sourceLabel && (
+              <span className="inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                {sourceLabel}
+              </span>
+            )}
             {showOwner && (
               <span className="inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
                 {owner}

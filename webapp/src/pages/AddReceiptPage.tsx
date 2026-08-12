@@ -29,7 +29,8 @@ function valuesFromParsed(parsed: ParsedReceipt, rawText: string, fileUrl: strin
     cardBank: parsed.card_bank || '',
     rawText,
     fileUrl,
-    visibility: 'household'
+    visibility: 'household',
+    source: fileUrl ? 'photo' : 'manual'
   }
 }
 
@@ -44,7 +45,8 @@ function emptyFormValues(rawText: string, fileUrl: string | null = null): Receip
     cardBank: '',
     rawText,
     fileUrl,
-    visibility: 'household'
+    visibility: 'household',
+    source: fileUrl ? 'photo' : 'manual'
   }
 }
 

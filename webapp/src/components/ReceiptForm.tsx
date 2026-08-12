@@ -3,7 +3,7 @@ import { EXPENSE_CATEGORIES, COMMON_CURRENCIES } from '../lib/categories'
 import { convertCurrency } from '../lib/currency'
 import { findPaymentMethod } from '../lib/supabaseClient'
 import type { ReceiptWriteInput } from '../lib/supabaseClient'
-import type { ReceiptVisibility } from '../types/receipt'
+import type { ReceiptVisibility, ReceiptSource } from '../types/receipt'
 
 export interface ReceiptFormValues {
   merchant: string
@@ -16,6 +16,7 @@ export interface ReceiptFormValues {
   rawText: string
   fileUrl: string | null
   visibility: ReceiptVisibility
+  source: ReceiptSource
 }
 
 interface ReceiptFormProps {
@@ -82,7 +83,8 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
         cardBank: values.cardBank || null,
         rawText: values.rawText,
         fileUrl: values.fileUrl,
-        visibility: values.visibility
+        visibility: values.visibility,
+        source: values.source
       }
 
       await onSubmit(input)

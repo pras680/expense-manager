@@ -1,14 +1,15 @@
 # Supabase project config.
 #
 # The only thing pinned here is per-function JWT verification, and it matters
-# more than it looks: both parse-receipt and process-sms-inbox read the caller's
-# role by base64-decoding the JWT payload WITHOUT verifying its signature. That
-# is only sound because Supabase's gateway has already verified it upstream.
+# more than it looks: parse-receipt, process-sms-inbox and manage-household all
+# read the caller's role (and for manage-household, their user id) by
+# base64-decoding the JWT payload WITHOUT verifying its signature. That is only
+# sound because Supabase's gateway has already verified it upstream.
 #
-# If verify_jwt were ever switched off for those functions, the role claim would
-# become attacker-controlled and both authorization checks could be forged by
-# hand-crafting a token. Keeping the setting in version control means it can't be
-# silently changed in the dashboard without the repo disagreeing.
+# If verify_jwt were switched off for any of them, those claims would become
+# attacker-controlled and the authorization checks could be forged by hand.
+# Keeping the setting in version control means it can't be silently changed in
+# the dashboard without the repo disagreeing.
 
 project_id = "expense-manager"
 
@@ -18,8 +19,16 @@ verify_jwt = true
 [functions.process-sms-inbox]
 verify_jwt = true
 
+[functions.manage-household]
+verify_jwt = true
+
 # receive-sms is called by an iOS Shortcut, which cannot hold a Supabase JWT.
 # It authenticates instead with a per-user token from sms_ingest_tokens, checked
 # in the function body (see resolveOwner).
 [functions.receive-sms]
 verify_jwt = false
+
+# scan-gmail is invoked only by pg_cron with the service_role key, and checks
+# that key itself in the function body.
+[functions.scan-gmail]
+verify_jwt = true

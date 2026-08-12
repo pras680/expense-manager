@@ -1,7 +1,7 @@
 import { env } from './env'
 import { receiptFromRow } from './receiptShape'
 import { randomId } from './id'
-import type { Receipt, ParsedReceipt, PaymentMethod } from '../types/receipt'
+import type { Receipt, ParsedReceipt, PaymentMethod, ReceiptSource } from '../types/receipt'
 
 const REST_URL = `${env.supabaseUrl}/rest/v1`
 const FUNCTIONS_URL = `${env.supabaseUrl}/functions/v1`
@@ -75,7 +75,7 @@ function isMissingColumnError(message: string): boolean {
 // so there's no reason to ever request them here (unlike insert/update, which
 // still probe for them in case the schema changes and fall back on a miss).
 const RECEIPTS_SELECT =
-  'id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,category,user_id,household_id,visibility'
+  'id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,category,user_id,household_id,visibility,source,reviewed_at'
 
 export async function listReceipts(): Promise<Receipt[]> {
   // RLS decides what comes back: own rows plus household-shared ones. No client
@@ -103,6 +103,8 @@ export interface ReceiptWriteInput {
   rawText: string
   fileUrl: string | null
   visibility: 'private' | 'household'
+  /** Preserve the original provenance on edit — an SMS receipt stays 'sms'. */
+  source?: ReceiptSource
 }
 
 function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: boolean) {
@@ -116,6 +118,10 @@ function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: bool
     currency: input.receiptCurrency || input.currency,
     file_url: input.fileUrl,
     visibility: input.visibility,
+    source: input.source ?? 'manual',
+    // A receipt the user typed or corrected by hand needs no separate review
+    // step — filling the form IS the review.
+    reviewed_at: new Date().toISOString(),
     raw_ocr_json: {
       raw_text: input.rawText,
       receipt_amount: String(input.receiptAmount),
@@ -448,4 +454,111 @@ export async function revokeSmsToken(id: string): Promise<void> {
     body: JSON.stringify({ revoked_at: new Date().toISOString() })
   })
   await throwIfNotOk(resp, 'Revoke SMS token failed')
+}
+
+/** Clears the "needs review" flag once a member has confirmed the details. */
+export async function markReceiptsReviewed(ids: string[], userId: string): Promise<void> {
+  if (ids.length === 0) return
+  const list = ids.map((id) => `"${id}"`).join(',')
+  const resp = await authorizedFetch(`${REST_URL}/receipts?id=in.(${list})`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify({ reviewed_at: new Date().toISOString(), reviewed_by: userId })
+  })
+  await throwIfNotOk(resp, 'Mark reviewed failed')
+}
+
+// ---------------------------------------------------------------------------
+// Household membership (privileged — goes through the manage-household function)
+// ---------------------------------------------------------------------------
+
+export interface AddedMember {
+  userId: string
+  email: string
+  displayName: string
+  /** Present only for a brand-new account. Shown once; never recoverable. */
+  password: string | null
+}
+
+async function manageHousehold(body: Record<string, unknown>) {
+  const resp = await authorizedFetch(`${FUNCTIONS_URL}/manage-household`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(data?.error ?? `Request failed (HTTP ${resp.status})`)
+  return data
+}
+
+export async function addHouseholdMember(email: string, displayName: string): Promise<AddedMember> {
+  const d = await manageHousehold({ action: 'add', email, display_name: displayName })
+  return {
+    userId: d.user_id,
+    email: d.email,
+    displayName: d.display_name,
+    password: d.password ?? null
+  }
+}
+
+export async function removeHouseholdMember(userId: string): Promise<void> {
+  await manageHousehold({ action: 'remove', user_id: userId })
+}
+
+// ---------------------------------------------------------------------------
+// Gmail connection
+// ---------------------------------------------------------------------------
+
+export interface GmailConnection {
+  email: string
+  connectedAt: string
+  lastScanAt: string | null
+  lastError: string | null
+}
+
+/** The redirect must match one registered in Google Cloud AND allow-listed server-side. */
+export function gmailRedirectUri(): string {
+  return `${window.location.origin}/settings/gmail/callback`
+}
+
+async function gmailConnect(body: Record<string, unknown>) {
+  const resp = await authorizedFetch(`${FUNCTIONS_URL}/gmail-connect`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ redirect_uri: gmailRedirectUri(), ...body })
+  })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(data?.error ?? `Request failed (HTTP ${resp.status})`)
+  return data
+}
+
+/** Returns Google's consent URL to send the browser to. */
+export async function startGmailConnect(): Promise<string> {
+  const d = await gmailConnect({ action: 'start' })
+  return d.url
+}
+
+export async function completeGmailConnect(code: string): Promise<string> {
+  const d = await gmailConnect({ action: 'callback', code })
+  return d.email
+}
+
+export async function disconnectGmail(): Promise<void> {
+  await gmailConnect({ action: 'disconnect' })
+}
+
+export async function getGmailConnection(): Promise<GmailConnection | null> {
+  const resp = await authorizedFetch(
+    `${REST_URL}/gmail_connections?select=email,connected_at,last_scan_at,last_error&limit=1`
+  )
+  if (!resp.ok) return null
+  const rows = await resp.json()
+  const row = Array.isArray(rows) ? rows[0] : null
+  if (!row) return null
+  return {
+    email: row.email,
+    connectedAt: row.connected_at,
+    lastScanAt: row.last_scan_at,
+    lastError: row.last_error
+  }
 }

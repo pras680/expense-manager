@@ -1,4 +1,6 @@
 export type ReceiptVisibility = 'private' | 'household'
+/** Where a receipt came from. 'sms' and 'gmail' arrive unattended and need checking. */
+export type ReceiptSource = 'manual' | 'photo' | 'sms' | 'gmail'
 
 export interface Receipt {
   id: string
@@ -21,6 +23,9 @@ export interface Receipt {
   householdId: string | null
   /** 'private' = owner only; 'household' = visible to and editable by all members. */
   visibility: ReceiptVisibility
+  source: ReceiptSource
+  /** Null means nobody has verified this auto-imported receipt yet. */
+  reviewedAt: string | null
 }
 
 export interface ParsedReceipt {

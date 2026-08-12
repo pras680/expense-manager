@@ -74,7 +74,10 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
     // Default to 'household' to match the column default: a row that predates
     // the column (or a legacy select that omits it) is shared, not silently
     // hidden from the rest of the household.
-    visibility: stringValue(row.visibility) === 'private' ? 'private' : 'household'
+    visibility: stringValue(row.visibility) === 'private' ? 'private' : 'household',
+    source: (['manual', 'photo', 'sms', 'gmail'] as const)
+      .find((s) => s === stringValue(row.source)) ?? 'manual',
+    reviewedAt: stringValue(row.reviewed_at)
   }
 }
 
@@ -114,4 +117,9 @@ export function receiptMatches(r: Receipt, query: string): boolean {
   }
   if (r.total != null && String(r.total).includes(q)) return true
   return false
+}
+
+/** Auto-imported and not yet verified by anyone in the household. */
+export function needsReview(r: Receipt): boolean {
+  return r.reviewedAt === null && (r.source === 'sms' || r.source === 'gmail')
 }

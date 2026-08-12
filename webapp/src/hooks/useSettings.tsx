@@ -11,6 +11,8 @@ interface SettingsContextValue {
   loading: boolean
   error: string | null
   setDefaultCurrency: (currency: string) => Promise<void>
+  /** Re-reads the roster after a member is added or removed. */
+  refreshMembers: () => Promise<void>
   /** Maps a receipt's user_id to a name for the owner badge. */
   nameFor: (userId: string | null) => string | null
 }
@@ -65,6 +67,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setDefaultCurrencyState(currency)
   }, [userId])
 
+  const refreshMembers = useCallback(async () => {
+    setMembers(await listHouseholdMembers())
+  }, [])
+
   const nameFor = useCallback((id: string | null) => {
     if (!id) return null
     if (id === userId) return 'You'
@@ -74,7 +80,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   return (
     <SettingsContext.Provider
-      value={{ defaultCurrency, displayName, householdId, members, loading, error, setDefaultCurrency, nameFor }}
+      value={{ defaultCurrency, displayName, householdId, members, loading, error, setDefaultCurrency, refreshMembers, nameFor }}
     >
       {children}
     </SettingsContext.Provider>
