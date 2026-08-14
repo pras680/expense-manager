@@ -14,6 +14,13 @@ import { ReportsByCategoryPage } from './pages/ReportsByCategoryPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SmsSetupPage } from './pages/SmsSetupPage'
 import { GmailSetupPage } from './pages/GmailSetupPage'
+import { useSwipeBack } from './hooks/useSwipeBack'
+
+/** Renders nothing; exists so the gesture hook sits inside the router. */
+function SwipeBackLayer() {
+  useSwipeBack()
+  return null
+}
 
 function AuthGate() {
   const { session, loading } = useAuth()
@@ -37,11 +44,20 @@ function AuthGate() {
     // provider instances, leaving the previous user's receipts and currency in
     // state until something happened to refetch them.
     <BrowserRouter key={session.userId}>
+      <SwipeBackLayer />
       <SettingsProvider>
         <ReceiptsProvider>
           <div
             className="min-h-dvh bg-neutral-50 dark:bg-neutral-950"
-            style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
+            // viewport-fit=cover + black-translucent means the web view runs
+            // under the iOS status bar when installed, so without the top inset
+            // the page header sits behind the clock and battery and can't be
+            // tapped. Padding (not margin) so the background still fills the
+            // notch strip.
+            style={{
+              paddingTop: 'env(safe-area-inset-top)',
+              paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'
+            }}
           >
             <Routes>
               <Route path="/" element={<ReceiptsListPage />} />

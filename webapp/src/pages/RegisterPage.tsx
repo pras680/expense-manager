@@ -34,7 +34,10 @@ export function RegisterPage({ onBackToSignIn }: { onBackToSignIn: () => void })
   }
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center px-6 py-8">
+    <div
+      className="flex min-h-dvh flex-col justify-center px-6 py-8"
+      style={{ paddingTop: 'calc(2rem + env(safe-area-inset-top))', paddingBottom: 'calc(2rem + env(safe-area-inset-bottom))' }}
+    >
       <div className="mx-auto w-full max-w-sm">
         <h1 className="text-center text-2xl font-bold text-neutral-900 dark:text-neutral-50">Create your account</h1>
         <p className="mt-1 text-center text-sm text-neutral-500 dark:text-neutral-400">

@@ -22,7 +22,10 @@ export function SignInPage({ onRegister }: { onRegister: () => void }) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col justify-center px-6">
+    <div
+      className="flex min-h-dvh flex-col justify-center px-6"
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
       <div className="mx-auto w-full max-w-sm">
         <h1 className="text-center text-2xl font-bold text-neutral-900 dark:text-neutral-50">Bill Skills</h1>
         <p className="mt-1 text-center text-sm text-neutral-500 dark:text-neutral-400">

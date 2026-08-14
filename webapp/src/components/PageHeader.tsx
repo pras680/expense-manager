@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { canGoBack } from '../lib/navigation'
 
 interface PageHeaderProps {
   title: string
@@ -16,11 +17,9 @@ export function PageHeader({ title, backTo, action }: PageHeaderProps) {
   const navigate = useNavigate()
 
   function goBack() {
-    // React Router tracks its own position in the history stack; idx > 0 means
-    // there is an in-app entry to return to, so popping gives the true previous
-    // screen rather than a fixed parent.
-    const idx = (window.history.state as { idx?: number } | null)?.idx
-    if (typeof idx === 'number' && idx > 0) {
+    // Popping gives the true previous screen; the fallback only applies when
+    // there is no in-app history (deep link, reload, PWA cold start).
+    if (canGoBack()) {
       navigate(-1)
     } else {
       navigate(backTo, { replace: true })
