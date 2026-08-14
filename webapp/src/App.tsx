@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { NavBar } from './components/NavBar'
 import { AuthProvider, useAuth } from './hooks/useAuth'
 import { ReceiptsProvider } from './hooks/useReceipts'
 import { SettingsProvider } from './hooks/useSettings'
 import { SignInPage } from './pages/SignInPage'
+import { RegisterPage } from './pages/RegisterPage'
 import { ReceiptsListPage } from './pages/ReceiptsListPage'
 import { AddReceiptPage } from './pages/AddReceiptPage'
 import { EditReceiptPage } from './pages/EditReceiptPage'
@@ -15,13 +17,18 @@ import { GmailSetupPage } from './pages/GmailSetupPage'
 
 function AuthGate() {
   const { session, loading } = useAuth()
+  // Pre-auth screens sit outside the router (it only mounts once signed in), so
+  // they swap on local state rather than routes.
+  const [showRegister, setShowRegister] = useState(false)
 
   if (loading) {
     return <div className="flex min-h-dvh items-center justify-center text-sm text-neutral-500">Loading…</div>
   }
 
   if (!session) {
-    return <SignInPage />
+    return showRegister
+      ? <RegisterPage onBackToSignIn={() => setShowRegister(false)} />
+      : <SignInPage onRegister={() => setShowRegister(true)} />
   }
 
   return (

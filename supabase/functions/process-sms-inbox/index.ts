@@ -141,7 +141,14 @@ type SMSInboxRow = {
   sender: string | null
   received_at: string
   user_id: string | null
+  retry_count: number
+  status: 'pending' | 'failed'
 }
+
+// Bounds how many times a transient failure (e.g. parse-receipt briefly
+// 502ing) gets retried before it's left as a permanent failure — otherwise a
+// row with a genuinely bad body would retry forever, every tick.
+const MAX_RETRIES = 3
 type RestHeaders = { apikey: string; Authorization: string; 'Content-Type': string }
 
 // Resolved once per owning user, then reused for every row that user owns.
@@ -184,8 +191,13 @@ serve(async (req) => {
   let failed = 0
 
   try {
+    // Pending rows plus failed rows still under the retry cap — a bare
+    // status=eq.pending filter is why a transient parse-receipt 502 used to
+    // strand a row in 'failed' forever with nothing ever looking at it again.
     const rowsResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/sms_inbox?select=id,body,sender,received_at,user_id&status=eq.pending&order=received_at.asc&limit=${BATCH_LIMIT}`,
+      `${SUPABASE_URL}/rest/v1/sms_inbox?select=id,body,sender,received_at,user_id,retry_count,status` +
+      `&or=(status.eq.pending,and(status.eq.failed,retry_count.lt.${MAX_RETRIES}))` +
+      `&order=received_at.asc&limit=${BATCH_LIMIT}`,
       { headers }
     )
     if (!rowsResp.ok) throw new Error(`Failed to fetch sms_inbox: HTTP ${rowsResp.status}`)
@@ -196,9 +208,9 @@ serve(async (req) => {
     const ownerCache = new Map<string, OwnerContext>()
 
     for (const row of rows) {
-      // Atomically claim the row (pending -> processing) so two overlapping
-      // invocations can't both process the same message.
-      const claimed = await claimRow(row.id, headers)
+      // Atomically claim the row (pending|failed -> processing) so two
+      // overlapping invocations can't both process the same message.
+      const claimed = await claimRow(row.id, row.status, row.retry_count, headers)
       if (!claimed) continue
 
       if (!row.user_id) {
@@ -268,11 +280,21 @@ async function loadOwnerContext(userId: string, headers: RestHeaders): Promise<O
   }
 }
 
-async function claimRow(id: string, headers: RestHeaders): Promise<boolean> {
-  const resp = await fetch(`${SUPABASE_URL}/rest/v1/sms_inbox?id=eq.${id}&status=eq.pending`, {
+async function claimRow(
+  id: string,
+  fromStatus: 'pending' | 'failed',
+  retryCount: number,
+  headers: RestHeaders
+): Promise<boolean> {
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/sms_inbox?id=eq.${id}&status=eq.${fromStatus}`, {
     method: 'PATCH',
     headers: { ...headers, Prefer: 'return=representation' },
-    body: JSON.stringify({ status: 'processing' })
+    body: JSON.stringify({
+      status: 'processing',
+      // Counts this attempt whether or not it goes on to fail again, so a row
+      // that keeps failing still exhausts MAX_RETRIES and stops retrying.
+      ...(fromStatus === 'failed' ? { retry_count: retryCount + 1 } : {})
+    })
   })
   if (!resp.ok) return false
   const rows = await resp.json()
@@ -316,8 +338,7 @@ async function processRow(
   }
 
   if (isReversalTransaction(smsText)) {
-    await markRow(row.id, headers, 'skipped', 'Reversal — not auto-processed', null)
-    return 'skipped'
+    return processReversal(row, smsText, headers, owner)
   }
 
   let parsed: Record<string, unknown>
@@ -511,6 +532,127 @@ async function processRow(
     return 'processed'
   } catch (err) {
     await markRow(row.id, headers, 'failed', `Insert failed: ${err instanceof Error ? err.message : String(err)}`, null)
+    return 'failed'
+  }
+}
+
+type OriginalReceipt = {
+  id: string
+  merchant: string | null
+  total: number
+  currency: string | null
+  card_last4: string | null
+  card_bank: string | null
+  category: string | null
+  date: string
+}
+
+// A reversal SMS doesn't create its own receipt — it cancels one that (should
+// have) already been created from the original charge SMS. Rather than mutate
+// that original row, this inserts a second, negative receipt that exactly
+// negates it (reversal_of_receipt_id ties the two together and stops the same
+// original being offset twice), so both the charge and its reversal stay
+// visible in history while totals net to zero.
+async function processReversal(
+  row: SMSInboxRow,
+  smsText: string,
+  headers: RestHeaders,
+  owner: OwnerContext
+): Promise<'processed' | 'skipped' | 'failed'> {
+  let parsed: Record<string, unknown>
+  try {
+    const parseResp = await fetch(`${SUPABASE_URL}/functions/v1/parse-receipt`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ raw_text: `SMS Expense Alert:\n${smsText}` })
+    })
+    if (!parseResp.ok) {
+      const errBody = await parseResp.text()
+      throw new Error(`parse-receipt HTTP ${parseResp.status}: ${errBody.slice(0, 200)}`)
+    }
+    parsed = await parseResp.json()
+  } catch (err) {
+    await markRow(row.id, headers, 'failed', `Reversal parse failed: ${err instanceof Error ? err.message : String(err)}`, null)
+    return 'failed'
+  }
+
+  const merchant = typeof parsed.merchant === 'string' ? parsed.merchant.trim() : ''
+  const totalRaw = typeof parsed.total === 'number' ? parsed.total : Number(parsed.total)
+  if (!merchant || !Number.isFinite(totalRaw) || totalRaw <= 0) {
+    await markRow(row.id, headers, 'skipped', 'Reversal — missing amount or merchant', null)
+    return 'skipped'
+  }
+
+  const receiptCurrency = typeof parsed.currency === 'string' && parsed.currency ? parsed.currency : owner.defaultCurrency
+  const rawDate = (typeof parsed.date === 'string' && parsed.date) ? parsed.date : row.received_at
+  const parsedDate = new Date(rawDate)
+  const normalizedDate = Number.isNaN(parsedDate.getTime()) ? row.received_at : parsedDate.toISOString()
+
+  const { converted } = await convertCurrency(totalRaw, receiptCurrency, owner.defaultCurrency, normalizedDate)
+
+  // Candidates: this owner's own positive-total receipts around the reversal's
+  // amount that haven't already been reversed. reversal_of_receipt_id=is.null
+  // excludes offset entries themselves (their total is negative anyway).
+  let candidates: OriginalReceipt[] = []
+  try {
+    const scope = owner.householdId ? `household_id=eq.${owner.householdId}` : `user_id=eq.${owner.userId}`
+    const from = new Date(new Date(normalizedDate).getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const candResp = await fetch(
+      `${SUPABASE_URL}/rest/v1/receipts?select=id,merchant,total,currency,card_last4,card_bank,category,date&${scope}` +
+      `&total=gte.${(converted - 0.01).toFixed(2)}&total=lte.${(converted + 0.01).toFixed(2)}` +
+      `&reversal_of_receipt_id=is.null&date=gte.${from}&date=lte.${normalizedDate}` +
+      `&order=date.desc&limit=10`,
+      { headers }
+    )
+    if (candResp.ok) candidates = await candResp.json()
+  } catch (_err) {
+    // Fall through — no candidates means we skip below rather than fail.
+  }
+
+  const needle = merchant.toLowerCase()
+  const match = candidates.find((r) => {
+    const other = (r.merchant ?? '').toLowerCase()
+    return other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))
+  })
+
+  if (!match) {
+    await markRow(row.id, headers, 'skipped', 'Reversal — no matching original charge found', null)
+    return 'skipped'
+  }
+
+  const offsetBody = {
+    merchant: match.merchant ?? merchant,
+    date: normalizedDate,
+    total: -match.total,
+    currency: match.currency ?? owner.defaultCurrency,
+    file_url: null,
+    category: match.category ?? 'Miscellaneous',
+    card_last4: match.card_last4,
+    card_bank: match.card_bank,
+    user_id: owner.userId,
+    household_id: owner.householdId,
+    visibility: 'household',
+    source: 'sms',
+    reversal_of_receipt_id: match.id,
+    raw_ocr_json: { raw_text: smsText, reversal_of_receipt_id: match.id, line_items: [] }
+  }
+
+  try {
+    const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/receipts`, {
+      method: 'POST',
+      headers: { ...headers, Prefer: 'return=representation' },
+      body: JSON.stringify(offsetBody)
+    })
+    if (!insertResp.ok) {
+      const errBody = await insertResp.text()
+      throw new Error(`Insert HTTP ${insertResp.status}: ${errBody.slice(0, 200)}`)
+    }
+    const inserted = await insertResp.json()
+    const receiptId = Array.isArray(inserted) ? inserted[0]?.id : inserted?.id
+    await markRow(row.id, headers, 'processed', null, receiptId ?? null)
+    return 'processed'
+  } catch (err) {
+    await markRow(row.id, headers, 'failed', `Reversal insert failed: ${err instanceof Error ? err.message : String(err)}`, null)
     return 'failed'
   }
 }

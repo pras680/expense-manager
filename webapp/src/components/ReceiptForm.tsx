@@ -57,8 +57,8 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
       setError('Merchant is required.')
       return
     }
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setError('Amount must be a positive number.')
+    if (!Number.isFinite(amount) || amount === 0) {
+      setError('Amount cannot be zero.')
       return
     }
 
@@ -122,7 +122,6 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
             type="number"
             inputMode="decimal"
             step="0.01"
-            min="0"
             value={values.receiptAmount}
             onChange={(e) => set('receiptAmount', e.target.value)}
             className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"

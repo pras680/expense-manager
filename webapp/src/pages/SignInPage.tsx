@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 
-export function SignInPage() {
+export function SignInPage({ onRegister }: { onRegister: () => void }) {
   const { signIn, expiredMessage } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -76,6 +76,14 @@ export function SignInPage() {
             {busy ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
+
+        <button
+          type="button"
+          onClick={onRegister}
+          className="mt-4 w-full text-center text-sm text-teal-700 dark:text-teal-400"
+        >
+          New here? Create an account
+        </button>
       </div>
     </div>
   )

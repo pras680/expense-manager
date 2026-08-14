@@ -55,6 +55,43 @@ async function requestToken(grantType: 'password' | 'refresh_token', body: Recor
   return resp.json()
 }
 
+/**
+ * Creates the account and its household via the register-user function, then
+ * signs in with the same credentials.
+ *
+ * Registration deliberately does not mint its own session — the function returns
+ * no token, so sessions come from exactly one place (signInWithPassword) and the
+ * post-registration state is identical to any ordinary sign-in.
+ */
+export async function registerAndSignIn(input: {
+  email: string
+  password: string
+  displayName: string
+  householdName: string
+  inviteCode: string
+}): Promise<Session> {
+  const resp = await fetch(`${env.supabaseUrl}/functions/v1/register-user`, {
+    method: 'POST',
+    headers: {
+      apikey: env.supabaseAnonKey,
+      Authorization: `Bearer ${env.supabaseAnonKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      email: input.email,
+      password: input.password,
+      display_name: input.displayName,
+      household_name: input.householdName,
+      invite_code: input.inviteCode
+    })
+  })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) {
+    throw new Error(data?.error ?? `Registration failed (HTTP ${resp.status})`)
+  }
+  return signInWithPassword(input.email, input.password)
+}
+
 export async function signInWithPassword(email: string, password: string): Promise<Session> {
   const resp = await requestToken('password', { email: email.trim(), password })
   const session = sessionFromResponse(resp)

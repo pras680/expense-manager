@@ -5,7 +5,8 @@ import {
   getStoredSession,
   refreshSessionIfNeeded,
   clearSession,
-  signOutEverywhere
+  signOutEverywhere,
+  registerAndSignIn
 } from '../lib/auth'
 import { configureAuth } from '../lib/supabaseClient'
 
@@ -15,6 +16,13 @@ interface AuthContextValue {
   /** Set when a session ended unexpectedly, so the sign-in screen can explain why. */
   expiredMessage: string | null
   signIn: (email: string, password: string) => Promise<void>
+  register: (input: {
+    email: string
+    password: string
+    displayName: string
+    householdName: string
+    inviteCode: string
+  }) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -110,6 +118,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(fresh)
   }, [])
 
+  const register = useCallback(async (input: {
+    email: string
+    password: string
+    displayName: string
+    householdName: string
+    inviteCode: string
+  }) => {
+    const fresh = await registerAndSignIn(input)
+    setExpiredMessage(null)
+    sessionRef.current = fresh
+    setSession(fresh)
+  }, [])
+
   const signOut = useCallback(async () => {
     const current = sessionRef.current
     sessionRef.current = null
@@ -119,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ session, loading, expiredMessage, signIn, signOut }}>
+    <AuthContext.Provider value={{ session, loading, expiredMessage, signIn, register, signOut }}>
       {children}
     </AuthContext.Provider>
   )
