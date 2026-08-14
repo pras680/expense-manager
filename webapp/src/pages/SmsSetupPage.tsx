@@ -8,6 +8,7 @@ import {
   type SmsIngestToken
 } from '../lib/supabaseClient'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { downloadSmsShortcut } from '../lib/smsShortcut'
 
 function formatDate(iso: string | null) {
   if (!iso) return 'never'
@@ -121,15 +122,26 @@ export function SmsSetupPage() {
           </div>
 
           <div className="mt-4 border-t border-teal-200 pt-3 text-xs text-teal-900 dark:border-teal-800 dark:text-teal-200">
-            <p className="font-semibold">iPhone Shortcut setup</p>
-            <ol className="mt-1 list-decimal space-y-1 pl-4">
+            <p className="font-semibold">iPhone setup</p>
+            <button
+              onClick={() => downloadSmsShortcut(`${env.supabaseUrl}/functions/v1/receive-sms`, newToken)}
+              className="mt-2 rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Download Shortcut
+            </button>
+            <ol className="mt-2 list-decimal space-y-1 pl-4">
+              <li>Open the downloaded file → <strong>Add Shortcut</strong>. (First time only: if nothing happens, go to Settings → Shortcuts and enable "Allow Untrusted Shortcuts" — it only appears there right after a blocked attempt, and only for a few minutes — then try the download again.)</li>
               <li>Shortcuts app → Automation → new automation → <strong>Message</strong> → received from your bank.</li>
-              <li>Add action <strong>Get Contents of URL</strong>.</li>
-              <li>URL: <code className="break-all">{env.supabaseUrl}/functions/v1/receive-sms</code></li>
-              <li>Method <strong>POST</strong>, Request Body <strong>JSON</strong>, with a <code>body</code> field set to the Shortcut's message text.</li>
-              <li>Add two headers: <code>Content-Type: application/json</code> and <code>x-sms-ingest-secret</code> set to the token above.</li>
+              <li>Add action <strong>Run Shortcut</strong> → choose <strong>SMS Import</strong> (the one you just added).</li>
               <li>Turn off "Ask Before Running".</li>
             </ol>
+            <p className="mt-2 text-[11px] text-teal-800/80 dark:text-teal-300/80">
+              Didn't work? Fall back to building it manually: <strong>Get Contents of URL</strong> →
+              URL <code className="break-all">{env.supabaseUrl}/functions/v1/receive-sms</code> →
+              Method <strong>POST</strong>, Request Body <strong>JSON</strong> with a <code>body</code> field set to
+              the message text, headers <code>Content-Type: application/json</code> and{' '}
+              <code>x-sms-ingest-secret</code> set to the token above.
+            </p>
           </div>
         </div>
       )}

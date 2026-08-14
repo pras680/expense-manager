@@ -428,6 +428,35 @@ async function processMessage(
     totalRaw, receiptCurrency, owner.defaultCurrency, normalizedDate
   )
 
+  // Cross-source duplicate guard — mirrors process-sms-inbox's: the same
+  // charge often reaches this owner as both a bank SMS and a receipt email
+  // (e.g. "NOVOWATT EV CHARGING SINGAPORE SGP" via SMS vs "Novowatt" via
+  // Gmail), and gmail_message_id alone only stops re-importing the same
+  // email twice, not the same real-world charge arriving from two sources.
+  try {
+    const scope = owner.householdId ? `household_id=eq.${owner.householdId}` : `user_id=eq.${owner.userId}`
+    const d = new Date(normalizedDate)
+    const from = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString()
+    const to = new Date(d.getTime() + 24 * 60 * 60 * 1000).toISOString()
+    const dupResp = await fetch(
+      `${SUPABASE_URL}/rest/v1/receipts?select=id,merchant&${scope}` +
+      `&total=gte.${(converted - 0.01).toFixed(2)}&total=lte.${(converted + 0.01).toFixed(2)}` +
+      `&date=gte.${from}&date=lte.${to}&limit=10`,
+      { headers }
+    )
+    if (dupResp.ok) {
+      const dupRows = await dupResp.json()
+      const needle = merchant.toLowerCase()
+      const match = Array.isArray(dupRows) && dupRows.some((r: { merchant?: string | null }) => {
+        const other = (r.merchant ?? '').toLowerCase()
+        return other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))
+      })
+      if (match) return 'skipped'
+    }
+  } catch (_err) {
+    // A failed duplicate check shouldn't block a legitimate import.
+  }
+
   const body = {
     merchant,
     date: normalizedDate,
