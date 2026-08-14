@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { PageHeader } from '../components/PageHeader'
 import { env } from '../lib/env'
 import {
   listSmsTokens,
@@ -84,8 +84,7 @@ export function SmsSetupPage() {
 
   return (
     <div className="px-4 pt-4 pb-6">
-      <Link to="/settings" className="text-sm text-teal-700 dark:text-teal-400">← Settings</Link>
-      <h1 className="mt-1 text-xl font-bold text-neutral-900 dark:text-neutral-50">SMS Import</h1>
+      <PageHeader title="SMS Import" backTo="/settings" />
       <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
         Your own token tells the server that a forwarded bank alert is <em>yours</em>, so the
         receipt lands under your name and uses your currency.

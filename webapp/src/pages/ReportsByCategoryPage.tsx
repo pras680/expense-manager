@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { useReceipts } from '../hooks/useReceipts'
 import { ReceiptCard } from '../components/ReceiptCard'
+import { PageHeader } from '../components/PageHeader'
 import { reportingTotal } from '../lib/receiptShape'
 import { useSettings } from '../hooks/useSettings'
 
@@ -30,11 +31,15 @@ export function ReportsByCategoryPage() {
 
   return (
     <div className="px-4 pt-4 pb-6">
-      <Link to="/reports" className="text-sm text-teal-700 dark:text-teal-400">← Reports</Link>
-      <div className="mt-1 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-50">{decoded}</h1>
-        <span className="text-lg font-semibold text-neutral-900 dark:text-neutral-50">{formatMoney(total)}</span>
-      </div>
+      <PageHeader
+        title={decoded}
+        backTo="/reports"
+        action={
+          <span className="shrink-0 text-lg font-semibold text-neutral-900 dark:text-neutral-50">
+            {formatMoney(total)}
+          </span>
+        }
+      />
 
       <div className="mt-3 flex flex-col gap-2">
         {filtered.length === 0 ? (

@@ -7,6 +7,8 @@ import { ReceiptCard } from '../components/ReceiptCard'
 import { StatTile } from '../components/StatTile'
 import { receiptMatches, reportingTotal, needsReview } from '../lib/receiptShape'
 import { markReceiptsReviewed } from '../lib/supabaseClient'
+import { MonthOverview } from '../components/MonthOverview'
+import { computeSpendingInsight } from '../lib/spendingInsights'
 
 type FilterKey = 'all' | 'last30' | 'noDate'
 type OwnerFilter = 'everyone' | 'mine'
@@ -64,16 +66,10 @@ export function ReceiptsListPage() {
     () => filtered.reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
     [filtered]
   )
-  const thisMonthSpend = useMemo(() => {
-    const now = new Date()
-    return receipts
-      .filter((r) => {
-        if (!r.date) return false
-        const d = new Date(r.date)
-        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
-      })
-      .reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0)
-  }, [receipts])
+  // Deliberately computed from all receipts, not `filtered` — the month summary
+  // is a fixed fact about the household, and would be nonsense if a search box
+  // could change "what you've spent this month".
+  const insight = useMemo(() => computeSpendingInsight(receipts), [receipts])
 
   function formatMoney(amount: number) {
     try {
@@ -122,10 +118,18 @@ export function ReceiptsListPage() {
         </div>
       )}
 
+      <div className="mt-3">
+        <MonthOverview insight={insight} currency={defaultCurrency} />
+      </div>
+
+      {/* These reflect the current filter, unlike the month summary above. */}
       <div className="mt-3 flex gap-2">
-        <StatTile label="Total" value={formatMoney(totalSpend)} />
-        <StatTile label="This Month" value={formatMoney(thisMonthSpend)} />
-        <StatTile label="Count" value={String(filtered.length)} />
+        <StatTile label="Shown" value={formatMoney(totalSpend)} />
+        <StatTile label="Receipts" value={String(filtered.length)} />
+        <StatTile
+          label="Months tracked"
+          value={String(insight.monthsOfHistory + (insight.thisMonth > 0 ? 1 : 0))}
+        />
       </div>
 
       <input

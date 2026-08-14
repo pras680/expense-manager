@@ -1,0 +1,111 @@
+import type { Receipt } from '../types/receipt'
+import { reportingTotal } from './receiptShape'
+
+export type SpendingPace = 'no-history' | 'under' | 'on-track' | 'over' | 'well-over'
+
+export interface SpendingInsight {
+  /** Spend booked in the current calendar month. */
+  thisMonth: number
+  /** Mean spend across completed months that have any receipts. */
+  monthlyAverage: number
+  /** How many completed months the average is drawn from. */
+  monthsOfHistory: number
+  /**
+   * What an average month would have reached by today. The honest comparison:
+   * measuring a part-month against a whole-month average always looks like a
+   * saving, which would make the assessment misleading for most of the month.
+   */
+  expectedByNow: number
+  /** thisMonth / monthlyAverage, for the meter. Null without history. */
+  fractionOfAverage: number | null
+  /** Signed share above/below the pro-rated expectation. Null without history. */
+  paceDelta: number | null
+  pace: SpendingPace
+  /** One-line plain-language read on the month so far. */
+  assessment: string
+}
+
+function monthKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+export function computeSpendingInsight(receipts: Receipt[], now = new Date()): SpendingInsight {
+  const currentKey = monthKey(now)
+
+  // Bucket by month, ignoring undated receipts — they can't be attributed to a
+  // month, and folding them into "this month" would overstate it.
+  const byMonth = new Map<string, number>()
+  for (const r of receipts) {
+    if (!r.date) continue
+    const d = new Date(r.date)
+    if (Number.isNaN(d.getTime())) continue
+    const amount = reportingTotal(r) ?? 0
+    const key = monthKey(d)
+    byMonth.set(key, (byMonth.get(key) ?? 0) + amount)
+  }
+
+  const thisMonth = byMonth.get(currentKey) ?? 0
+
+  // The current month is partial, so it must not drag the average down. Future
+  // months (possible via a mis-parsed date) are excluded for the same reason.
+  const completed = Array.from(byMonth.entries())
+    .filter(([key]) => key < currentKey)
+    .map(([, total]) => total)
+
+  const monthsOfHistory = completed.length
+  const monthlyAverage = monthsOfHistory > 0
+    ? completed.reduce((sum, n) => sum + n, 0) / monthsOfHistory
+    : 0
+
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  const dayOfMonth = now.getDate()
+  const monthProgress = dayOfMonth / daysInMonth
+  const expectedByNow = monthlyAverage * monthProgress
+
+  if (monthsOfHistory === 0) {
+    return {
+      thisMonth,
+      monthlyAverage: 0,
+      monthsOfHistory: 0,
+      expectedByNow: 0,
+      fractionOfAverage: null,
+      paceDelta: null,
+      pace: 'no-history',
+      assessment: thisMonth > 0
+        ? 'First month of tracking — next month there will be an average to compare against.'
+        : 'No spending recorded yet this month.'
+    }
+  }
+
+  const fractionOfAverage = monthlyAverage > 0 ? thisMonth / monthlyAverage : 0
+  // Guard the divide: a household whose only completed months were all zero
+  // would otherwise produce Infinity here.
+  const paceDelta = expectedByNow > 0 ? (thisMonth - expectedByNow) / expectedByNow : 0
+
+  let pace: SpendingPace
+  if (paceDelta > 0.35) pace = 'well-over'
+  else if (paceDelta > 0.1) pace = 'over'
+  else if (paceDelta < -0.15) pace = 'under'
+  else pace = 'on-track'
+
+  const pct = Math.round(Math.abs(paceDelta) * 100)
+  const daysLeft = daysInMonth - dayOfMonth
+  const assessment = {
+    'well-over': `Spending is ${pct}% above your usual pace for day ${dayOfMonth} — noticeably heavier than a typical month.`,
+    over: `Running about ${pct}% ahead of your usual pace, with ${daysLeft} day${daysLeft === 1 ? '' : 's'} to go.`,
+    'on-track': `Right about on track — roughly a normal month so far, with ${daysLeft} day${daysLeft === 1 ? '' : 's'} left.`,
+    under: `Tracking ${pct}% below your usual pace — a lighter month than normal so far.`,
+    'no-history': ''
+  }[pace]
+
+  return {
+    thisMonth,
+    monthlyAverage,
+    monthsOfHistory,
+    expectedByNow,
+    fractionOfAverage,
+    paceDelta,
+    pace,
+    assessment
+  }
+}

@@ -221,7 +221,7 @@ export function AddReceiptPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-50">Review Receipt</h1>
         <button onClick={reset} className="text-sm text-neutral-500 dark:text-neutral-400">
-          Back
+          Start over
         </button>
       </div>
       {imagePreviewUrl && (

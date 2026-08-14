@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ReceiptForm, type ReceiptFormValues } from '../components/ReceiptForm'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { PageHeader } from '../components/PageHeader'
 import { useReceipts } from '../hooks/useReceipts'
 import { useSettings } from '../hooks/useSettings'
 import { updateReceipt, deleteReceipt, type ReceiptWriteInput } from '../lib/supabaseClient'
@@ -59,15 +60,18 @@ export function EditReceiptPage() {
 
   return (
     <div className="px-4 pt-4 pb-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-50">Edit Receipt</h1>
-        <button
-          onClick={() => setConfirmingDelete(true)}
-          className="text-sm font-medium text-red-600"
-        >
-          Delete
-        </button>
-      </div>
+      <PageHeader
+        title="Edit Receipt"
+        backTo="/"
+        action={
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            className="shrink-0 px-1 text-sm font-medium text-red-600"
+          >
+            Delete
+          </button>
+        }
+      />
       <div className="mt-4">
         <ReceiptForm
           initial={initial}
