@@ -16,9 +16,10 @@ Legacy source snapshot, not maintained for security fixes:
 
 `/Users/prasannaganesan/git_repos/expense-manager/ios-app`
 
-Supabase Edge Function:
+Supabase Edge Functions:
 
-`/Users/prasannaganesan/git_repos/expense-manager/supabase-edge/parse-receipt`
+`supabase/functions/` — deployed source for all functions.
+`supabase-edge/` — SQL migrations, runbooks, and one-off scripts.
 
 ## Recommended Xcode setup
 
@@ -34,7 +35,7 @@ Use the checked-in project at `ExpenseManager/ExpenseManager.xcodeproj` with the
 - `ExpenseManager/ExpenseManager/Services/OCRService.swift` — Apple Vision OCR.
 - `ExpenseManager/ExpenseManager/Services/DocumentScanner.swift` — camera integration.
 - `ExpenseManager/ExpenseManager/Services/SupabaseService.swift` — REST, storage, and Edge Function calls.
-- `supabase-edge/parse-receipt/index.ts` — Anthropic parsing Edge Function.
+- `supabase/functions/parse-receipt/index.ts` — receipt parsing Edge Function (LLM-backed).
 
 ## Test flow
 
