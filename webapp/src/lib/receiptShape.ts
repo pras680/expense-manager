@@ -1,5 +1,5 @@
 import type { Receipt } from '../types/receipt'
-import { DEFAULT_CURRENCY } from './categories'
+import { DEFAULT_CURRENCY, isExpenseCategory } from './categories'
 
 // Ported from ExpenseManager/ExpenseManager/Models/Invoice.swift's
 // `init?(from dictionary:)` — prefer the top-level column, fall back to
@@ -41,6 +41,10 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
   const category = stringValue(row.category) ?? stringValue(rawJson.category)
   const cardLast4 = stringValue(row.card_last4) ?? stringValue(rawJson.card_last4)
   const cardBank = stringValue(row.card_bank) ?? stringValue(rawJson.card_bank)
+  const transferFromBank = stringValue(row.transfer_from_bank) ?? stringValue(rawJson.transfer_from_bank)
+  const transferToBank = stringValue(row.transfer_to_bank) ?? stringValue(rawJson.transfer_to_bank)
+  const transferKindRaw = stringValue(row.transfer_kind) ?? stringValue(rawJson.transfer_kind)
+  const transferKind = transferKindRaw === 'self' || transferKindRaw === 'external' ? transferKindRaw : null
 
   const storedTotal = numberValue(row.total)
   const receiptAmount = numberValue(row.receipt_amount) ?? numberValue(rawJson.receipt_amount) ?? storedTotal
@@ -78,6 +82,9 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
     category,
     cardLast4,
     cardBank,
+    transferFromBank,
+    transferToBank,
+    transferKind,
     rawText,
     lineItems,
     fileUrl: stringValue(row.file_url),
@@ -99,6 +106,11 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
 
 export function reportingTotal(r: Receipt): number | null {
   return r.total ?? r.convertedTotal
+}
+
+/** False for Money Transfer / Credit Card Bill Payment — money moved, not spent. */
+export function isExpenseReceipt(r: Receipt): boolean {
+  return isExpenseCategory(r.category)
 }
 
 export function reportingCurrency(r: Receipt): string {

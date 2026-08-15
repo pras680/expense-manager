@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { EXPENSE_CATEGORIES, COMMON_CURRENCIES } from '../lib/categories'
+import { EXPENSE_CATEGORIES, COMMON_CURRENCIES, TRANSFER_KINDS } from '../lib/categories'
 import { convertCurrency } from '../lib/currency'
 import { findPaymentMethod } from '../lib/supabaseClient'
 import type { ReceiptWriteInput } from '../lib/supabaseClient'
 import type { ReceiptVisibility, ReceiptSource } from '../types/receipt'
+
+const MONEY_TRANSFER_CATEGORY = 'Money Transfer'
 
 export interface ReceiptFormValues {
   merchant: string
@@ -13,6 +15,9 @@ export interface ReceiptFormValues {
   category: string
   cardLast4: string
   cardBank: string
+  transferFromBank: string
+  transferToBank: string
+  transferKind: 'self' | 'external' | ''
   rawText: string
   lineItems: { description: string; amount: number | null }[]
   fileUrl: string | null
@@ -35,6 +40,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
   const [values, setValues] = useState(initial)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const isTransfer = values.category === MONEY_TRANSFER_CATEGORY
 
   function set<K extends keyof ReceiptFormValues>(key: K, value: ReceiptFormValues[K]) {
     setValues((v) => ({ ...v, [key]: value }))
@@ -82,6 +88,9 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
         category: values.category || 'Miscellaneous',
         cardLast4: values.cardLast4 ? values.cardLast4.replace(/[^0-9]/g, '').slice(-4) : null,
         cardBank: values.cardBank || null,
+        transferFromBank: values.transferFromBank.trim() || null,
+        transferToBank: values.transferToBank.trim() || null,
+        transferKind: values.transferKind || null,
         rawText: values.rawText,
         lineItems: values.lineItems,
         fileUrl: values.fileUrl,
@@ -106,13 +115,15 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
       )}
 
       <label className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Merchant</span>
+        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+          {isTransfer ? 'Recipient' : 'Merchant'}
+        </span>
         <input
           type="text"
           value={values.merchant}
           onChange={(e) => set('merchant', e.target.value)}
           className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
-          placeholder="e.g. Starbucks"
+          placeholder={isTransfer ? 'e.g. John Tan, or self' : 'e.g. Starbucks'}
           required
         />
       </label>
@@ -167,7 +178,63 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+        {isTransfer && (
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            Money transfers aren't counted in your monthly spending — they show up separately in Reports.
+          </p>
+        )}
       </label>
+
+      {isTransfer && (
+        <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900/50">
+          <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Transfer details</span>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">From bank</span>
+              <input
+                type="text"
+                value={values.transferFromBank}
+                onChange={(e) => set('transferFromBank', e.target.value)}
+                className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+                placeholder="e.g. DBS"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">To bank</span>
+              <input
+                type="text"
+                value={values.transferToBank}
+                onChange={(e) => set('transferToBank', e.target.value)}
+                className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+                placeholder="e.g. OCBC"
+              />
+            </label>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Transfer type</span>
+            <div className="flex gap-2">
+              {TRANSFER_KINDS.map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => set('transferKind', kind)}
+                  aria-pressed={values.transferKind === kind}
+                  className={`flex-1 rounded-lg py-2.5 text-sm font-medium capitalize ${
+                    values.transferKind === kind
+                      ? 'bg-teal-700 text-white'
+                      : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+                  }`}
+                >
+                  {kind}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Self = between your own accounts. External = to someone else's account.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1">
@@ -194,6 +261,25 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
             placeholder="Optional"
           />
         </label>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Raw extracted text</span>
+        {values.rawText ? (
+          <textarea
+            readOnly
+            value={values.rawText}
+            rows={6}
+            className="rounded-lg border border-neutral-300 bg-neutral-50 px-3 py-2.5 font-mono text-xs text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-300"
+          />
+        ) : (
+          <p className="rounded-lg border border-dashed border-neutral-300 px-3 py-2.5 text-xs text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+            No source text for this receipt — it was entered manually.
+          </p>
+        )}
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          What the SMS, email, or photo actually said — check the fields above against this before saving.
+        </p>
       </div>
 
       <div className="flex flex-col gap-1">

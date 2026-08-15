@@ -1,5 +1,5 @@
 import type { Receipt } from '../types/receipt'
-import { reportingTotal } from './receiptShape'
+import { reportingTotal, isExpenseReceipt } from './receiptShape'
 
 export type SpendingPace = 'no-history' | 'under' | 'on-track' | 'over' | 'well-over'
 
@@ -33,10 +33,12 @@ export function computeSpendingInsight(receipts: Receipt[], now = new Date()): S
   const currentKey = monthKey(now)
 
   // Bucket by month, ignoring undated receipts — they can't be attributed to a
-  // month, and folding them into "this month" would overstate it.
+  // month, and folding them into "this month" would overstate it. Money
+  // Transfer / Credit Card Bill Payment are excluded too: that money moved
+  // between accounts, it wasn't spent, so it shouldn't count toward pace.
   const byMonth = new Map<string, number>()
   for (const r of receipts) {
-    if (!r.date) continue
+    if (!r.date || !isExpenseReceipt(r)) continue
     const d = new Date(r.date)
     if (Number.isNaN(d.getTime())) continue
     const amount = reportingTotal(r) ?? 0

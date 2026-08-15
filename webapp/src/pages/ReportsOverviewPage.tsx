@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 import { useReceipts } from '../hooks/useReceipts'
 import { useSettings } from '../hooks/useSettings'
 import { StatTile } from '../components/StatTile'
-import { reportingTotal } from '../lib/receiptShape'
+import { reportingTotal, isExpenseReceipt } from '../lib/receiptShape'
+
+const NON_EXPENSE_REPORT_CATEGORIES = ['Money Transfer', 'Credit Card Bill Payment'] as const
 
 function formatMoney(amount: number, currency: string) {
   try {
@@ -17,29 +19,42 @@ export function ReportsOverviewPage() {
   const { receipts } = useReceipts()
   const { defaultCurrency } = useSettings()
 
+  // Money Transfer / Credit Card Bill Payment are money moving between
+  // accounts, not spend — every total/chart below is expense-only. They get
+  // their own section further down instead.
+  const expenseReceipts = useMemo(() => receipts.filter(isExpenseReceipt), [receipts])
+
   const totalSpend = useMemo(
-    () => receipts.reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
-    [receipts]
+    () => expenseReceipts.reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
+    [expenseReceipts]
   )
 
   const thisMonthSpend = useMemo(() => {
     const now = new Date()
-    return receipts
+    return expenseReceipts
       .filter((r) => {
         if (!r.date) return false
         const d = new Date(r.date)
         return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
       })
       .reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0)
-  }, [receipts])
+  }, [expenseReceipts])
 
   const byCategory = useMemo(() => {
     const map = new Map<string, number>()
-    for (const r of receipts) {
+    for (const r of expenseReceipts) {
       const key = r.category || 'Miscellaneous'
       map.set(key, (map.get(key) ?? 0) + (reportingTotal(r) ?? 0))
     }
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
+  }, [expenseReceipts])
+
+  const notCountedAsSpend = useMemo(() => {
+    return NON_EXPENSE_REPORT_CATEGORIES.map((category) => {
+      const inCategory = receipts.filter((r) => (r.category || '') === category)
+      const total = inCategory.reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0)
+      return { category, total, count: inCategory.length }
+    }).filter((c) => c.count > 0)
   }, [receipts])
 
   const last7Days = useMemo(() => {
@@ -50,7 +65,7 @@ export function ReportsOverviewPage() {
       d.setDate(d.getDate() - i)
       const next = new Date(d)
       next.setDate(next.getDate() + 1)
-      const total = receipts
+      const total = expenseReceipts
         .filter((r) => {
           if (!r.date) return false
           const t = new Date(r.date).getTime()
@@ -60,7 +75,7 @@ export function ReportsOverviewPage() {
       days.push({ label: d.toLocaleDateString(undefined, { weekday: 'short' }), total })
     }
     return days
-  }, [receipts])
+  }, [expenseReceipts])
 
   const maxDay = Math.max(1, ...last7Days.map((d) => d.total))
 
@@ -106,6 +121,31 @@ export function ReportsOverviewPage() {
           </Link>
         ))}
       </div>
+
+      {notCountedAsSpend.length > 0 && (
+        <>
+          <h2 className="mt-6 text-sm font-semibold text-neutral-700 dark:text-neutral-300">Not Counted as Spend</h2>
+          <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            Money that moved, but wasn't spent — kept out of the totals above.
+          </p>
+          <div className="mt-2 flex flex-col gap-2">
+            {notCountedAsSpend.map(({ category, total, count }) => (
+              <Link
+                key={category}
+                to={`/reports/category/${encodeURIComponent(category)}`}
+                className="flex items-center justify-between rounded-lg border border-dashed border-neutral-300 bg-neutral-50 px-4 py-3 dark:border-neutral-700 dark:bg-neutral-900/50"
+              >
+                <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                  {category} <span className="text-neutral-400 dark:text-neutral-500">· {count}</span>
+                </span>
+                <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+                  {formatMoney(total, defaultCurrency)}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }

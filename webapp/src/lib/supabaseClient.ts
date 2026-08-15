@@ -100,6 +100,10 @@ export interface ReceiptWriteInput {
   category: string
   cardLast4: string | null
   cardBank: string | null
+  /** Only meaningful when category is 'Money Transfer'. */
+  transferFromBank: string | null
+  transferToBank: string | null
+  transferKind: 'self' | 'external' | null
   rawText: string
   lineItems: { description: string; amount: number | null }[]
   fileUrl: string | null
@@ -133,6 +137,9 @@ function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: bool
       category: input.category,
       card_last4: input.cardLast4 ?? '',
       card_bank: input.cardBank ?? '',
+      transfer_from_bank: input.transferFromBank ?? '',
+      transfer_to_bank: input.transferToBank ?? '',
+      transfer_kind: input.transferKind ?? '',
       // Kept so a receipt stays searchable by what was bought on it, not just
       // by merchant — previously the parser returned these and they were dropped.
       line_items: input.lineItems
@@ -147,6 +154,9 @@ function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: bool
     body.category = input.category
     body.card_last4 = input.cardLast4
     body.card_bank = input.cardBank
+    body.transfer_from_bank = input.transferFromBank
+    body.transfer_to_bank = input.transferToBank
+    body.transfer_kind = input.transferKind
   }
   return body
 }

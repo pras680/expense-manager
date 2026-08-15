@@ -5,7 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { ReceiptCard } from '../components/ReceiptCard'
 import { StatTile } from '../components/StatTile'
-import { receiptMatches, reportingTotal, needsReview } from '../lib/receiptShape'
+import { receiptMatches, reportingTotal, needsReview, isExpenseReceipt } from '../lib/receiptShape'
 import { markReceiptsReviewed } from '../lib/supabaseClient'
 import { MonthOverview } from '../components/MonthOverview'
 import { computeSpendingInsight } from '../lib/spendingInsights'
@@ -63,7 +63,7 @@ export function ReceiptsListPage() {
   }, [receipts, filter, query, ownerFilter, session?.userId, onlyUnreviewed])
 
   const totalSpend = useMemo(
-    () => filtered.reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
+    () => filtered.filter(isExpenseReceipt).reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
     [filtered]
   )
   // Deliberately computed from all receipts, not `filtered` — the month summary

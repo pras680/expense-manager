@@ -27,6 +27,11 @@ function valuesFromParsed(parsed: ParsedReceipt, rawText: string, fileUrl: strin
     category: parsed.category || 'Miscellaneous',
     cardLast4: parsed.card_last4 || '',
     cardBank: parsed.card_bank || '',
+    // The parser never guesses these — bank alerts rarely name the receiving
+    // bank, and "self vs external" is only known to the person reviewing it.
+    transferFromBank: '',
+    transferToBank: '',
+    transferKind: '',
     // The parser's transcription wins for photos (there is no other source of
     // receipt text); pasted text keeps what the user actually pasted.
     rawText: rawText || (parsed.raw_text ?? ''),
@@ -48,6 +53,9 @@ function emptyFormValues(rawText: string, fileUrl: string | null = null): Receip
     category: 'Miscellaneous',
     cardLast4: '',
     cardBank: '',
+    transferFromBank: '',
+    transferToBank: '',
+    transferKind: '',
     rawText,
     lineItems: [],
     fileUrl,
