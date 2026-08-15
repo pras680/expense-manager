@@ -1,14 +1,18 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 
-// Edge function that takes { raw_text } and calls Google Gemini's OpenAI-compatible
+// Edge function that takes { raw_text } and calls Groq's OpenAI-compatible
 // chat completions API to extract structured receipt data.
 // Environment variables required:
-// - LLM_API_KEY   (a Google AI Studio / Gemini API key)
+// - LLM_API_KEY   (a Groq API key)
 // - LLM_MODEL (optional)
+//
+// qwen/qwen3.6-27b is the only Groq-hosted model on this account with both
+// image input (needed for the webapp's camera-capture path) and json_mode —
+// swap only to another model with both, or the image path breaks silently.
 
-const LLM_API_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+const LLM_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const LLM_API_KEY = Deno.env.get('LLM_API_KEY')
-const LLM_MODEL = Deno.env.get('LLM_MODEL') ?? 'gemini-3.6-flash'
+const LLM_MODEL = Deno.env.get('LLM_MODEL') ?? 'qwen/qwen3.6-27b'
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 
 // Supabase's verify_jwt gate accepts the public anon key, which ships inside the
@@ -98,11 +102,14 @@ serve(async (req) => {
 
     const chatBody = {
       model: LLM_MODEL,
-      // Gemini tends to narrate in prose/markdown before settling into JSON
-      // (previously hit finish_reason "length" and got cut off mid-answer at
-      // 1000 tokens) — response_format forces JSON-only output, and the
-      // higher budget is headroom in case it still doesn't.
+      // qwen3.6 is a reasoning model by default, which burns hundreds of
+      // tokens "thinking" in a separate field before ever writing the JSON
+      // answer — unnecessary latency/cost for a fixed-shape extraction task,
+      // so reasoning is turned off. response_format still forces JSON-only
+      // content; the token budget is headroom for a large multi-line-item
+      // receipt photo, not for reasoning.
       max_tokens: 4000,
+      reasoning_effort: 'none',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
