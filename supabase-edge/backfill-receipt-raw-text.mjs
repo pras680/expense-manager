@@ -127,6 +127,14 @@ async function main() {
         headers,
         body: JSON.stringify({ image_base64: b64, image_mime_type: mime })
       })
+      if (parseResp.status === 429) {
+        // Out of quota for now. Every remaining row would fail the same way, so
+        // stop rather than turning one quota limit into a wall of failures —
+        // the run is resumable, since nothing already written is redone.
+        console.error(`\n  Stopped at ${label}: the LLM account is rate limited or out of quota (429).`)
+        console.error('  Wait for the quota to reset (or raise the limit), then re-run to resume.')
+        break
+      }
       if (!parseResp.ok) {
         console.warn(`  FAIL  ${label} — parse HTTP ${parseResp.status} ${(await parseResp.text()).slice(0, 120)}`)
         failed++

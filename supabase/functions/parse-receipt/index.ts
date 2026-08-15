@@ -124,7 +124,13 @@ serve(async (req) => {
       // — log them server-side, but never echo them back to the caller.
       const errBody = await resp.text()
       console.error(`LLM request failed with status ${resp.status}: ${errBody}`)
-      return jsonResponse({ error: 'Receipt parser unavailable' }, 502)
+      // The status alone is safe to return and is the difference between
+      // "you are rate limited / out of quota" (429) and a real fault, which is
+      // otherwise indistinguishable from outside the function's logs.
+      if (resp.status === 429) {
+        return jsonResponse({ error: 'Receipt parser is rate limited or out of quota', upstream_status: 429 }, 429)
+      }
+      return jsonResponse({ error: 'Receipt parser unavailable', upstream_status: resp.status }, 502)
     }
 
     const chatJson = await resp.json()
