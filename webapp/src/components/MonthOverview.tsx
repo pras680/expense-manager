@@ -8,7 +8,7 @@ const PACE_STYLE: Record<SpendingPace, { fill: string; track: string; dot: strin
     fill: 'bg-neutral-400',
     track: 'bg-neutral-200 dark:bg-neutral-700',
     dot: 'bg-neutral-400',
-    text: 'text-neutral-600 dark:text-neutral-400'
+    text: 'text-neutral-600 dark:text-neutral-300'
   },
   under: {
     fill: 'bg-teal-600',
@@ -72,11 +72,11 @@ export function MonthOverview({ insight, currency }: MonthOverviewProps) {
   return (
     <section className="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+        <h2 className="text-sm font-medium text-neutral-600 dark:text-neutral-300">
           {monthLabel} so far
         </h2>
         {hasHistory && (
-          <span className="text-xs text-neutral-500 dark:text-neutral-400">
+          <span className="text-sm text-neutral-600 dark:text-neutral-300">
             avg {money(insight.monthlyAverage)}/mo
           </span>
         )}
@@ -107,7 +107,7 @@ export function MonthOverview({ insight, currency }: MonthOverviewProps) {
               aria-hidden="true"
             />
           </div>
-          <div className="mt-1.5 flex justify-between text-[11px] text-neutral-500 dark:text-neutral-400">
+          <div className="mt-2 flex justify-between text-[13px] text-neutral-600 dark:text-neutral-300">
             <span>{Math.round(fillPct)}% of a typical month</span>
             <span>pace marker: {money(insight.expectedByNow)}</span>
           </div>
@@ -116,7 +116,7 @@ export function MonthOverview({ insight, currency }: MonthOverviewProps) {
 
       <div className="mt-3 flex items-start gap-2">
         <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${style.dot}`} aria-hidden="true" />
-        <p className={`text-sm ${style.text}`}>{insight.assessment}</p>
+        <p className={`text-[15px] leading-snug ${style.text}`}>{insight.assessment}</p>
       </div>
     </section>
   )
