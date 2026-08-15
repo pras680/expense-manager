@@ -16,7 +16,7 @@ export interface Receipt {
   category: string | null
   cardLast4: string | null
   cardBank: string | null
-  /** Only meaningful when category is 'Money Transfer'. */
+  /** Only meaningful when category is 'Local Transfer'. */
   transferFromBank: string | null
   transferToBank: string | null
   transferKind: 'self' | 'external' | null

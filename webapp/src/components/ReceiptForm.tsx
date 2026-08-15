@@ -5,7 +5,7 @@ import { findPaymentMethod } from '../lib/supabaseClient'
 import type { ReceiptWriteInput } from '../lib/supabaseClient'
 import type { ReceiptVisibility, ReceiptSource } from '../types/receipt'
 
-const MONEY_TRANSFER_CATEGORY = 'Money Transfer'
+const LOCAL_TRANSFER_CATEGORY = 'Local Transfer'
 
 export interface ReceiptFormValues {
   merchant: string
@@ -40,7 +40,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
   const [values, setValues] = useState(initial)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const isTransfer = values.category === MONEY_TRANSFER_CATEGORY
+  const isTransfer = values.category === LOCAL_TRANSFER_CATEGORY
 
   function set<K extends keyof ReceiptFormValues>(key: K, value: ReceiptFormValues[K]) {
     setValues((v) => ({ ...v, [key]: value }))
@@ -180,7 +180,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
         </select>
         {isTransfer && (
           <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Money transfers aren't counted in your monthly spending — they show up separately in Reports.
+            Local transfers aren't counted in your monthly spending — they show up separately in Reports.
           </p>
         )}
       </label>

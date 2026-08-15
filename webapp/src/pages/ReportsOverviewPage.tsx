@@ -5,7 +5,7 @@ import { useSettings } from '../hooks/useSettings'
 import { StatTile } from '../components/StatTile'
 import { reportingTotal, isExpenseReceipt } from '../lib/receiptShape'
 
-const NON_EXPENSE_REPORT_CATEGORIES = ['Money Transfer', 'Credit Card Bill Payment'] as const
+const NON_EXPENSE_REPORT_CATEGORIES = ['Local Transfer', 'Credit Card Bill Payment'] as const
 
 function formatMoney(amount: number, currency: string) {
   try {
@@ -19,7 +19,7 @@ export function ReportsOverviewPage() {
   const { receipts } = useReceipts()
   const { defaultCurrency } = useSettings()
 
-  // Money Transfer / Credit Card Bill Payment are money moving between
+  // Local Transfer / Credit Card Bill Payment are money moving between
   // accounts, not spend — every total/chart below is expense-only. They get
   // their own section further down instead.
   const expenseReceipts = useMemo(() => receipts.filter(isExpenseReceipt), [receipts])
@@ -81,7 +81,12 @@ export function ReportsOverviewPage() {
 
   return (
     <div className="px-4 pt-4 pb-6">
-      <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-50">Reports</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-50">Reports</h1>
+        <Link to="/reports/monthly" className="text-sm font-medium text-teal-700 dark:text-teal-400">
+          Monthly →
+        </Link>
+      </div>
 
       <div className="mt-3 flex gap-2">
         <StatTile label="Total" value={formatMoney(totalSpend, defaultCurrency)} />

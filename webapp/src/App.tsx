@@ -11,6 +11,8 @@ import { AddReceiptPage } from './pages/AddReceiptPage'
 import { EditReceiptPage } from './pages/EditReceiptPage'
 import { ReportsOverviewPage } from './pages/ReportsOverviewPage'
 import { ReportsByCategoryPage } from './pages/ReportsByCategoryPage'
+import { ReportsMonthlyPage } from './pages/ReportsMonthlyPage'
+import { ReportsMonthDetailPage } from './pages/ReportsMonthDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SmsSetupPage } from './pages/SmsSetupPage'
 import { GmailSetupPage } from './pages/GmailSetupPage'
@@ -65,6 +67,8 @@ function AuthGate() {
               <Route path="/receipts/:id/edit" element={<EditReceiptPage />} />
               <Route path="/reports" element={<ReportsOverviewPage />} />
               <Route path="/reports/category/:category" element={<ReportsByCategoryPage />} />
+              <Route path="/reports/monthly" element={<ReportsMonthlyPage />} />
+              <Route path="/reports/monthly/:month" element={<ReportsMonthDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSetupPage />} />
               <Route path="/settings/gmail" element={<GmailSetupPage />} />

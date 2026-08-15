@@ -108,7 +108,7 @@ export function reportingTotal(r: Receipt): number | null {
   return r.total ?? r.convertedTotal
 }
 
-/** False for Money Transfer / Credit Card Bill Payment — money moved, not spent. */
+/** False for Local Transfer / Credit Card Bill Payment — money moved, not spent. */
 export function isExpenseReceipt(r: Receipt): boolean {
   return isExpenseCategory(r.category)
 }
