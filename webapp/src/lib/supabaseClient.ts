@@ -101,6 +101,7 @@ export interface ReceiptWriteInput {
   cardLast4: string | null
   cardBank: string | null
   rawText: string
+  lineItems: { description: string; amount: number | null }[]
   fileUrl: string | null
   visibility: 'private' | 'household'
   /** Preserve the original provenance on edit — an SMS receipt stays 'sms'. */
@@ -131,7 +132,10 @@ function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: bool
       converted_total: String(input.convertedTotal),
       category: input.category,
       card_last4: input.cardLast4 ?? '',
-      card_bank: input.cardBank ?? ''
+      card_bank: input.cardBank ?? '',
+      // Kept so a receipt stays searchable by what was bought on it, not just
+      // by merchant — previously the parser returned these and they were dropped.
+      line_items: input.lineItems
     }
   }
   if (includeOptionalColumns) {

@@ -14,6 +14,7 @@ export interface ReceiptFormValues {
   cardLast4: string
   cardBank: string
   rawText: string
+  lineItems: { description: string; amount: number | null }[]
   fileUrl: string | null
   visibility: ReceiptVisibility
   source: ReceiptSource
@@ -82,6 +83,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
         cardLast4: values.cardLast4 ? values.cardLast4.replace(/[^0-9]/g, '').slice(-4) : null,
         cardBank: values.cardBank || null,
         rawText: values.rawText,
+        lineItems: values.lineItems,
         fileUrl: values.fileUrl,
         visibility: values.visibility,
         source: values.source

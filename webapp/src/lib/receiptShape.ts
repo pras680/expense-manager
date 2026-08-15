@@ -52,6 +52,17 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
   const reportingTotal = convertedTotal ?? (sourceCurrency === targetCurrency ? storedTotal : null)
 
   const rawText = stringValue(rawJson.raw_text) ?? ''
+  // Persisted by the parser; searching these is what makes a receipt findable
+  // by something bought on it rather than only by merchant.
+  const lineItems = Array.isArray(rawJson.line_items)
+    ? (rawJson.line_items as unknown[]).flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const row = item as Record<string, unknown>
+        const description = stringValue(row.description)
+        if (!description) return []
+        return [{ description, amount: numberValue(row.amount) }]
+      })
+    : []
 
   return {
     id: row.id,
@@ -68,6 +79,7 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
     cardLast4,
     cardBank,
     rawText,
+    lineItems,
     fileUrl: stringValue(row.file_url),
     userId: stringValue(row.user_id),
     householdId: stringValue(row.household_id),
@@ -111,6 +123,7 @@ export function receiptMatches(r: Receipt, query: string): boolean {
   if (r.cardLast4?.toLowerCase().includes(q)) return true
   if (r.cardBank?.toLowerCase().includes(q)) return true
   if (r.rawText.toLowerCase().includes(q)) return true
+  if (r.lineItems.some((li) => li.description.toLowerCase().includes(q))) return true
   if (r.date) {
     const formatted = new Date(r.date).toLocaleDateString(undefined, { dateStyle: 'medium' }).toLowerCase()
     if (formatted.includes(q)) return true

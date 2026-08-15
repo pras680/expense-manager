@@ -36,6 +36,7 @@ export function EditReceiptPage() {
     cardLast4: receipt.cardLast4 || '',
     cardBank: receipt.cardBank || '',
     rawText: receipt.rawText,
+    lineItems: receipt.lineItems,
     fileUrl: receipt.fileUrl,
     visibility: receipt.visibility,
     source: receipt.source

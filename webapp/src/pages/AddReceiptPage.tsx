@@ -27,7 +27,12 @@ function valuesFromParsed(parsed: ParsedReceipt, rawText: string, fileUrl: strin
     category: parsed.category || 'Miscellaneous',
     cardLast4: parsed.card_last4 || '',
     cardBank: parsed.card_bank || '',
-    rawText,
+    // The parser's transcription wins for photos (there is no other source of
+    // receipt text); pasted text keeps what the user actually pasted.
+    rawText: rawText || (parsed.raw_text ?? ''),
+    lineItems: (parsed.line_items ?? []).flatMap((li) =>
+      li?.description ? [{ description: li.description, amount: li.amount ?? null }] : []
+    ),
     fileUrl,
     visibility: 'household',
     source: fileUrl ? 'photo' : 'manual'
@@ -44,6 +49,7 @@ function emptyFormValues(rawText: string, fileUrl: string | null = null): Receip
     cardLast4: '',
     cardBank: '',
     rawText,
+    lineItems: [],
     fileUrl,
     visibility: 'household',
     source: fileUrl ? 'photo' : 'manual'

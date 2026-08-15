@@ -17,6 +17,7 @@ export interface Receipt {
   cardLast4: string | null
   cardBank: string | null
   rawText: string
+  lineItems: { description: string; amount: number | null }[]
   fileUrl: string | null
   /** Owner. Set server-side by the receipts_set_owner trigger, never by the client. */
   userId: string | null
@@ -38,6 +39,7 @@ export interface ParsedReceipt {
   card_bank?: string | null
   category?: string | null
   line_items?: { description?: string; amount?: number }[]
+  raw_text?: string | null
 }
 
 export interface PaymentMethod {
