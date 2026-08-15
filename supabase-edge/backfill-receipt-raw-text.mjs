@@ -50,6 +50,24 @@ const headers = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+const BUCKET = 'receipt-documents'
+
+/**
+ * file_url is stored in two shapes depending on when the row was written:
+ * older rows hold a full .../object/public/<bucket>/<path> URL from when the
+ * bucket was public, newer ones hold just the bare <uid>/<file> object path.
+ * Mirrors objectPathFromFileUrl in webapp/src/lib/supabaseClient.ts.
+ *
+ * Either way the request has to go to the authenticated /object/ endpoint —
+ * /object/public/ serves anonymously and returns 400 for a private bucket no
+ * matter what credentials accompany it.
+ */
+function objectUrlFor(fileUrl) {
+  const marker = `/${BUCKET}/`
+  const objectPath = fileUrl.includes(marker) ? fileUrl.split(marker)[1] : fileUrl
+  return `${SUPABASE_URL}/storage/v1/object/${BUCKET}/${objectPath}`
+}
+
 function needsBackfill(row) {
   if (!row.file_url) return false
   const j = row.raw_ocr_json
@@ -86,12 +104,7 @@ async function main() {
   for (const row of todo) {
     const label = `${row.date} ${row.merchant ?? '(no merchant)'}`
     try {
-      // Stored URLs use the /object/public/ form from when the bucket was
-      // public. That endpoint serves anonymously and now 400s for a private
-      // bucket regardless of credentials, so rewrite to the authenticated
-      // /object/ path, which does honour the service_role header.
-      const objectUrl = row.file_url.replace('/storage/v1/object/public/', '/storage/v1/object/')
-      const imgResp = await fetch(objectUrl, {
+      const imgResp = await fetch(objectUrlFor(row.file_url), {
         headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` }
       })
       if (!imgResp.ok) {
