@@ -65,6 +65,16 @@ export function ReportsMonthDetailPage() {
         <StatTile label="Receipts" value={String(inMonth.length)} />
       </div>
 
+      <Link
+        to={`/reports/category/All?month=${key}`}
+        className="mt-4 flex items-center justify-between rounded-lg border-2 border-teal-600 bg-teal-50 px-4 py-3 dark:border-teal-500 dark:bg-teal-950/40"
+      >
+        <span className="text-sm font-bold text-teal-900 dark:text-teal-100">All Receipts</span>
+        <span className="text-sm font-semibold text-teal-900 dark:text-teal-100">
+          {formatMoney(total, defaultCurrency)}
+        </span>
+      </Link>
+
       <h2 className="mt-6 text-sm font-semibold text-neutral-700 dark:text-neutral-300">By Category</h2>
       <div className="mt-2 flex flex-col gap-2">
         {byCategory.length === 0 && (
