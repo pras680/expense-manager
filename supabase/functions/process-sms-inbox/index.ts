@@ -346,7 +346,11 @@ async function processRow(
     const parseResp = await fetch(`${SUPABASE_URL}/functions/v1/parse-receipt`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ raw_text: `SMS Expense Alert:\n${smsText}` })
+      // Bank alerts routinely omit the year (e.g. "15 Aug 16:55") — the SMS's
+      // own arrival time is a far better anchor for inferring it than the
+      // parser's own clock, which has no idea when this particular message
+      // was actually sent.
+      body: JSON.stringify({ raw_text: `SMS Expense Alert:\n${smsText}`, reference_date: row.received_at })
     })
     if (!parseResp.ok) {
       const errBody = await parseResp.text()
@@ -564,7 +568,11 @@ async function processReversal(
     const parseResp = await fetch(`${SUPABASE_URL}/functions/v1/parse-receipt`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ raw_text: `SMS Expense Alert:\n${smsText}` })
+      // Bank alerts routinely omit the year (e.g. "15 Aug 16:55") — the SMS's
+      // own arrival time is a far better anchor for inferring it than the
+      // parser's own clock, which has no idea when this particular message
+      // was actually sent.
+      body: JSON.stringify({ raw_text: `SMS Expense Alert:\n${smsText}`, reference_date: row.received_at })
     })
     if (!parseResp.ok) {
       const errBody = await parseResp.text()

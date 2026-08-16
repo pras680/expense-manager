@@ -384,7 +384,10 @@ async function processMessage(
     const parseResp = await fetch(`${SUPABASE_URL}/functions/v1/parse-receipt`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ raw_text: rawText })
+      // The email's own internalDate is a far better anchor for inferring a
+      // missing year than the parser's own clock — same reasoning as
+      // process-sms-inbox's reference_date.
+      body: JSON.stringify({ raw_text: rawText, reference_date: receivedISO })
     })
     if (!parseResp.ok) throw new Error(`parse-receipt HTTP ${parseResp.status}`)
     parsed = await parseResp.json()
