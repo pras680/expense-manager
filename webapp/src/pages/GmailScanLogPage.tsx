@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { PageHeader } from '../components/PageHeader'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { getGmailScanLog, clearGmailScanLog, type GmailScanLogEntry } from '../lib/supabaseClient'
+import {
+  getGmailScanLog,
+  clearGmailScanLog,
+  retryGmailScanLogEntry,
+  type GmailScanLogEntry
+} from '../lib/supabaseClient'
 
 function formatWhen(iso: string | null) {
   if (!iso) return null
@@ -17,6 +22,7 @@ export function GmailScanLogPage() {
   const [error, setError] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -31,6 +37,19 @@ export function GmailScanLogPage() {
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
+
+  async function handleRetry(id: string) {
+    setRetryingId(id)
+    setError(null)
+    try {
+      await retryGmailScanLogEntry(id)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRetryingId(null)
+    }
+  }
 
   async function handleClear() {
     setClearing(true)
@@ -88,9 +107,18 @@ export function GmailScanLogPage() {
               key={e.id}
               className="rounded-lg border border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900"
             >
-              <p className="text-sm font-medium text-neutral-900 dark:text-neutral-50">
-                {e.subject || '(no subject)'}
-              </p>
+              <div className="flex items-start justify-between gap-3">
+                <p className="min-w-0 truncate text-sm font-medium text-neutral-900 dark:text-neutral-50">
+                  {e.subject || '(no subject)'}
+                </p>
+                <button
+                  onClick={() => handleRetry(e.id)}
+                  disabled={retryingId === e.id}
+                  className="shrink-0 text-xs font-medium text-teal-700 disabled:opacity-60 dark:text-teal-400"
+                >
+                  {retryingId === e.id ? 'Retrying…' : 'Retry'}
+                </button>
+              </div>
               {e.sender && (
                 <p className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400">{e.sender}</p>
               )}

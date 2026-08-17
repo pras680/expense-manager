@@ -639,3 +639,17 @@ export async function clearGmailScanLog(): Promise<void> {
   })
   await throwIfNotOk(resp, 'Clear scan log failed')
 }
+
+/**
+ * Gives one message a fresh retry budget. scan-gmail's hasExhaustedRetries()
+ * only sees a message as "used up its attempts" via its gmail_scan_log row —
+ * deleting that row makes the next scan treat it as never-attempted, no
+ * different from a message it's never seen before.
+ */
+export async function retryGmailScanLogEntry(id: string): Promise<void> {
+  const resp = await authorizedFetch(`${REST_URL}/gmail_scan_log?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: { Prefer: 'return=minimal' }
+  })
+  await throwIfNotOk(resp, 'Retry failed')
+}
