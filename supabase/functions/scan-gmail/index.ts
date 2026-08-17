@@ -30,47 +30,52 @@ const corsHeaders = {
   'Content-Type': 'application/json'
 }
 
-// ---- Ported from GmailReceiptScanner.swift ----
+// ---- Was ported from GmailReceiptScanner.swift; redesigned after the
+// Redmart/Lazada miss below (see git history for the original) ----
+//
+// The original filter here was ~30 exact quoted phrases ("order confirmed",
+// "order is completed", "payment alert", ...), used both to build the Gmail
+// search query and, after fetching, to gate whether to spend an LLM call on a
+// message at all. It kept losing to real-world subject lines: a Lazada order
+// email titled "your order is confirmed!" matched none of them, because
+// Gmail's search treats a quoted multi-word term as an exact phrase — "order
+// confirmed" does not match text containing "order is confirmed". Every fix
+// was another phrase, for one more retailer's exact wording, forever.
+//
+// Two changes, matching the two places a decision actually gets made:
+//
+// 1. The Gmail search query (QUERY_TERMS) still has to be keyword-based —
+//    that's a Gmail API constraint, not a choice made here — but it's now a
+//    short list of common single words. A single word is far more forgiving
+//    of phrasing than a quoted exact phrase: "order" alone matches "order
+//    confirmed", "order is confirmed", "your order has shipped", and every
+//    other tense/wording variant at once. Gmail's own -category:promotions
+//    and -category:social exclusions do the noise-cutting that the long
+//    phrase list used to attempt, without having to enumerate every retailer.
+//
+// 2. The old looksLikeReceipt() keyword-gated whether an already-fetched
+//    email was even worth an LLM call — but it's the same brittleness one
+//    step later, and it's entirely our own logic, not a Gmail API constraint.
+//    It's replaced with the one check that's actually about content rather
+//    than wording (does a number resembling money appear anywhere?), and
+//    real qualification — "does this describe an actual purchase or
+//    transfer" — moves to the LLM itself, which reads meaning rather than
+//    matching strings. See parse-receipt's system prompt.
 
 const QUERY_TERMS = [
-  'receipt', 'invoice', 'bill', '"tax invoice"', '"order confirmation"', '"payment confirmation"',
-  // Grocery/e-commerce delivery platforms (Redmart etc.) send a completion
-  // notice rather than a confirmation — "your order is completed" — which
-  // none of the phrasing above matches, so the email never reached Gmail's
-  // search results at all, let alone the looksLikeReceipt check below.
-  '"order completed"', '"order is completed"', '"order confirmed"', '"order delivered"', '"delivery confirmation"',
-  'itinerary', '"flight itinerary"', '"travel itinerary"', '"booking confirmation"', '"e-ticket"', '"air ticket"',
-  'paynow', '"pay now"', 'paylah', '"fund transfer"', '"funds transfer"', '"bank transfer"',
-  '"fast transfer"', '"transfer successful"', '"successful transfer"', '"payment alert"', '"transaction alert"',
-  '"transaction notification"', '"debit advice"', '"paid to"', '"sent to"', '"transferred to"', 'uen',
-  '"credit card payment"', '"card bill payment"', '"payment to credit card"'
-]
-
-const RECEIPT_TERMS = [
-  'receipt', 'invoice', 'bill', 'tax invoice', 'payment confirmation', 'payment received',
-  'order confirmation', 'order completed', 'order is completed', 'order confirmed',
-  'order delivered', 'delivery confirmation',
-  'booking confirmation', 'flight itinerary', 'travel itinerary',
-  'itinerary', 'e-ticket', 'air ticket', 'amount paid', 'total paid'
-]
-
-const PAYMENT_ALERT_TERMS = [
-  'paynow', 'pay now', 'paylah', 'fund transfer', 'funds transfer', 'bank transfer',
-  'fast transfer', 'transfer successful', 'successful transfer', 'payment alert',
-  'transaction alert', 'transaction notification', 'debit advice', 'you have paid',
-  'paid to', 'sent to', 'transferred to', 'payment to', 'uen', 'credit card payment',
-  'card bill payment', 'payment to credit card', 'credit card bill'
+  'receipt', 'invoice', 'bill', 'order', 'payment', 'paid', 'transaction',
+  'confirmed', 'delivered', 'itinerary', 'ticket', 'booking',
+  'paynow', 'paylah', 'transfer', 'uen'
 ]
 
 const AMOUNT_RE =
   /(?:(?:[$€£¥₹]|sgd|s\$)\s?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|(?:[$€£¥₹]|sgd|s\$)\s?\d+(?:\.\d{1,2})?|\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})/i
 
-function containsAny(terms: string[], text: string): boolean {
-  return terms.some((t) => text.includes(t))
-}
-
+// The one cheap, content-based (not wording-based) pre-check: an email with
+// no number resembling a monetary amount anywhere in it cannot be a receipt,
+// whatever else it says. Everything else is left to the LLM.
 function looksLikeReceipt(text: string): boolean {
-  return (containsAny(RECEIPT_TERMS, text) || containsAny(PAYMENT_ALERT_TERMS, text)) && AMOUNT_RE.test(text)
+  return AMOUNT_RE.test(text)
 }
 
 function base64UrlDecode(encoded: string): string {
@@ -252,7 +257,12 @@ async function scanForUser(
 
   const afterDate = since.toISOString().slice(0, 10).replace(/-/g, '/')
   const lookbackDays = Math.max(1, Math.ceil((Date.now() - since.getTime()) / (24 * 60 * 60 * 1000)))
-  const query = `newer_than:${lookbackDays}d after:${afterDate} {${QUERY_TERMS.join(' ')}}`
+  // Category exclusions do the noise-cutting a longer keyword list used to
+  // attempt — bulk marketing and social notifications are excluded by Gmail's
+  // own classification rather than by guessing every promotional phrase.
+  const query =
+    `newer_than:${lookbackDays}d after:${afterDate} {${QUERY_TERMS.join(' ')}} ` +
+    `-category:promotions -category:social -category:forums`
 
   let ids: string[] = []
   try {
@@ -403,7 +413,7 @@ async function processMessage(
 
   if (!looksLikeReceipt(rawText.toLowerCase())) {
     await logScan(owner.userId, messageId, subject, sender, receivedISO,
-      "Didn't look like a receipt or payment alert (no matching keywords + amount).", headers)
+      "No amount found in this email, so it can't be a receipt.", headers)
     return 'skipped'
   }
 
