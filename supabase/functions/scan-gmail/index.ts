@@ -490,13 +490,29 @@ async function processMessage(
           headers, true)
         return 'failed'
       }
-      throw new Error(`parse-receipt HTTP ${parseResp.status}`)
+      // parse-receipt's error body carries a `truncated` flag (its response
+      // was cut off mid-JSON by its own token budget, distinct from every
+      // other failure mode) — worth a specific message rather than the same
+      // bucket as "couldn't reach the parser at all", since the fix for each
+      // is different and this is exactly what was previously indistinguishable.
+      const errBody = await parseResp.json().catch(() => null)
+      const reason = errBody?.truncated
+        ? "The receipt was too large for the parser to finish reading (response was cut off)."
+        : errBody?.upstream_status === 413
+        ? 'This email was too large for the parser to read at all.'
+        : `The receipt parser returned an error (HTTP ${parseResp.status}).`
+      await logScan(owner.userId, messageId, subject, sender, receivedISO, reason, headers)
+      console.error(`parse-receipt HTTP ${parseResp.status} for ${messageId}: ${JSON.stringify(errBody)}`)
+      return 'failed'
     }
     parsed = await parseResp.json()
   } catch (err) {
+    // Only genuine network/unreachable failures land here now — every
+    // response-received-but-not-ok case is handled, and logged distinctly,
+    // above.
     await logScan(owner.userId, messageId, subject, sender, receivedISO,
-      'The receipt parser failed to read this email.', headers)
-    console.error(`parse failed for ${messageId}: ${err instanceof Error ? err.message : err}`)
+      'Could not reach the receipt parser.', headers)
+    console.error(`parse-receipt unreachable for ${messageId}: ${err instanceof Error ? err.message : err}`)
     return 'failed'
   }
 

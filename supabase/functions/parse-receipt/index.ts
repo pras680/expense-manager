@@ -118,8 +118,14 @@ serve(async (req) => {
       // tokens "thinking" in a separate field before ever writing the JSON
       // answer — unnecessary latency/cost for a fixed-shape extraction task,
       // so reasoning is turned off. response_format still forces JSON-only
-      // content; the token budget is headroom for a large multi-line-item
-      // receipt photo, not for reasoning.
+      // content.
+      //
+      // 4000 is empirically the ceiling, not a conservative choice: raising
+      // it to 8000 to give large multi-item receipts more headroom made
+      // Groq reject the request outright with 413 (too large) rather than
+      // truncate gracefully — this account's rate/context limit sits
+      // somewhere between the two, and 4000 is the last confirmed-working
+      // value. Do not raise this without confirming against a real call.
       max_tokens: 4000,
       reasoning_effort: 'none',
       response_format: { type: 'json_object' },
@@ -149,6 +155,14 @@ serve(async (req) => {
       if (resp.status === 429) {
         return jsonResponse({ error: 'Receipt parser is rate limited or out of quota', upstream_status: 429 }, 429)
       }
+      // 413 is the input+requested-output combination exceeding the model's
+      // context limit, rejected upfront rather than truncated — distinct from
+      // finish_reason 'length' below, which is a response cut off mid-stream.
+      // Both mean "too big", worth telling apart in logs if the cap (see
+      // max_tokens above) ever needs revisiting.
+      if (resp.status === 413) {
+        return jsonResponse({ error: 'Receipt text was too large for the parser', upstream_status: 413 }, 502)
+      }
       return jsonResponse({ error: 'Receipt parser unavailable', upstream_status: resp.status }, 502)
     }
 
@@ -166,7 +180,16 @@ serve(async (req) => {
       return jsonResponse(parsed)
     } catch (_err) {
       console.error(`Receipt parser returned invalid JSON (finish_reason=${lastFinishReason}): ${assistantText}`)
-      return jsonResponse({ error: 'Receipt parser returned invalid data' }, 502)
+      // finish_reason 'length' means the response was cut off mid-JSON by
+      // max_tokens, not that the model produced garbage — a large multi-item
+      // receipt (many line_items) is exactly the case that runs closest to the
+      // budget. Worth distinguishing in the client-visible error: one says
+      // "give it more room", the other says "something is actually wrong".
+      const truncated = lastFinishReason === 'length'
+      return jsonResponse(
+        { error: 'Receipt parser returned invalid data', truncated },
+        502
+      )
     }
   } catch (err) {
     const message = err instanceof Error ? err.name : 'UnknownError'
