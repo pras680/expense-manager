@@ -590,11 +590,13 @@ export interface GmailScanLogEntry {
   emailDate: string | null
   reason: string
   scannedAt: string
+  /** How many genuine (non-rate-limit) attempts this message has used. */
+  retryCount: number
 }
 
 export async function getGmailScanLog(limit = 50): Promise<GmailScanLogEntry[]> {
   const resp = await authorizedFetch(
-    `${REST_URL}/gmail_scan_log?select=id,subject,sender,email_date,reason,scanned_at` +
+    `${REST_URL}/gmail_scan_log?select=id,subject,sender,email_date,reason,scanned_at,retry_count` +
     `&order=scanned_at.desc&limit=${limit}`
   )
   if (!resp.ok) return []
@@ -606,7 +608,8 @@ export async function getGmailScanLog(limit = 50): Promise<GmailScanLogEntry[]> 
     sender: row.sender,
     emailDate: row.email_date,
     reason: row.reason,
-    scannedAt: row.scanned_at
+    scannedAt: row.scanned_at,
+    retryCount: typeof row.retry_count === 'number' ? row.retry_count : 1
   }))
 }
 

@@ -98,6 +98,10 @@ export function GmailScanLogPage() {
               <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
                 {formatWhen(e.emailDate) ? `Email: ${formatWhen(e.emailDate)} · ` : ''}
                 Scanned {formatWhen(e.scannedAt)}
+                {/* MAX_PARSE_ATTEMPTS in scan-gmail/index.ts — keep in sync. */}
+                {e.retryCount >= 3
+                  ? ' · Won’t retry again'
+                  : e.retryCount > 1 ? ` · Tried ${e.retryCount}×` : ''}
               </p>
             </div>
           ))}

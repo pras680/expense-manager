@@ -22,6 +22,12 @@ const GMAIL_CLIENT_SECRET = Deno.env.get('GMAIL_CLIENT_SECRET')
 const MAX_MESSAGES_PER_USER = 8
 const DEFAULT_LOOKBACK_DAYS = 7
 const MAX_RAW_TEXT_CHARS = 18_000
+// Same cap and reasoning as process-sms-inbox's retry_count: a genuine failure
+// gets a few chances (a flaky fetch, a brief parser fault) before the scanner
+// gives up and stops re-attempting it every tick. Rate limits don't count
+// against this budget at all — see logScan — because a 429 says nothing about
+// whether the email is a valid receipt, only that the request timing was bad.
+const MAX_PARSE_ATTEMPTS = 3
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -381,6 +387,11 @@ async function processMessage(
     if (Array.isArray(rows) && rows.length > 0) return 'skipped'
   }
 
+  // Already tried this exact message MAX_PARSE_ATTEMPTS times and it never
+  // became a receipt? Stop here — no Gmail fetch, no LLM call, no new log
+  // write. The scan log's existing row already explains why.
+  if (await hasExhaustedRetries(owner.userId, messageId, headers)) return 'skipped'
+
   let rawText = ''
   let receivedISO = new Date().toISOString()
   let subject = ''
@@ -427,7 +438,20 @@ async function processMessage(
       // process-sms-inbox's reference_date.
       body: JSON.stringify({ raw_text: rawText, reference_date: receivedISO })
     })
-    if (!parseResp.ok) throw new Error(`parse-receipt HTTP ${parseResp.status}`)
+    if (!parseResp.ok) {
+      // A 429 says the LLM provider was rate limited or out of quota at this
+      // exact moment — nothing about whether the email is a valid receipt.
+      // Logged distinctly and NOT counted against the retry budget, so it
+      // keeps being retried on the next tick like a fresh message, rather
+      // than one bad-luck rate limit permanently burying a real receipt.
+      if (parseResp.status === 429) {
+        await logScan(owner.userId, messageId, subject, sender, receivedISO,
+          'The receipt parser was rate limited — will retry automatically on the next scan.',
+          headers, true)
+        return 'failed'
+      }
+      throw new Error(`parse-receipt HTTP ${parseResp.status}`)
+    }
     parsed = await parseResp.json()
   } catch (err) {
     await logScan(owner.userId, messageId, subject, sender, receivedISO,
@@ -558,6 +582,13 @@ async function processMessage(
 // Diagnostic trail for "why didn't this email become a receipt" — see
 // multiuser-11-gmail-scan-log.sql. Best-effort: a logging failure must never
 // take down the scan itself, so this never throws.
+// Upsert rather than always-insert: repeated failures on the same message
+// update one row (bumping retry_count) instead of piling up duplicate log
+// entries every 15 minutes, and retry_count is what hasExhaustedRetries()
+// checks to stop re-attempting a message that's genuinely never going to
+// succeed. isRateLimited messages do NOT bump retry_count — a 429 says
+// nothing about whether the email is a valid receipt, only that the request
+// landed at a bad moment, and it should keep being retried like new.
 async function logScan(
   userId: string,
   messageId: string,
@@ -565,23 +596,59 @@ async function logScan(
   sender: string | null,
   emailDate: string | null,
   reason: string,
-  headers: RestHeaders
+  headers: RestHeaders,
+  isRateLimited = false
 ): Promise<void> {
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/gmail_scan_log`, {
-      method: 'POST',
-      headers: { ...headers, Prefer: 'return=minimal' },
-      body: JSON.stringify({
-        user_id: userId,
-        message_id: messageId,
-        subject,
-        sender,
-        email_date: emailDate,
-        reason
-      })
-    })
+    const existingResp = await fetch(
+      `${SUPABASE_URL}/rest/v1/gmail_scan_log?select=retry_count&user_id=eq.${userId}&message_id=eq.${messageId}&limit=1`,
+      { headers }
+    )
+    const existingRows = existingResp.ok ? await existingResp.json() : []
+    const existing = Array.isArray(existingRows) ? existingRows[0] : null
+
+    const body = {
+      user_id: userId,
+      message_id: messageId,
+      subject,
+      sender,
+      email_date: emailDate,
+      reason,
+      scanned_at: new Date().toISOString(),
+      retry_count: existing
+        ? (isRateLimited ? existing.retry_count : existing.retry_count + 1)
+        : (isRateLimited ? 0 : 1)
+    }
+
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/gmail_scan_log?on_conflict=user_id,message_id`,
+      {
+        method: 'POST',
+        headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(body)
+      }
+    )
   } catch (_err) {
     // Never block the scan on a logging failure.
+  }
+}
+
+// The cheap early-exit that actually saves the wasted work: no Gmail fetch,
+// no LLM call, not even a log write, for a message that's already used up its
+// retries. The existing log row (with its original reason and timestamp)
+// speaks for it — this is the "carry the error, don't rescan" the UI shows.
+async function hasExhaustedRetries(userId: string, messageId: string, headers: RestHeaders): Promise<boolean> {
+  try {
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/gmail_scan_log?select=retry_count&user_id=eq.${userId}&message_id=eq.${messageId}&limit=1`,
+      { headers }
+    )
+    if (!resp.ok) return false
+    const rows = await resp.json()
+    const row = Array.isArray(rows) ? rows[0] : null
+    return typeof row?.retry_count === 'number' && row.retry_count >= MAX_PARSE_ATTEMPTS
+  } catch {
+    return false
   }
 }
 
