@@ -34,6 +34,11 @@ const corsHeaders = {
 
 const QUERY_TERMS = [
   'receipt', 'invoice', 'bill', '"tax invoice"', '"order confirmation"', '"payment confirmation"',
+  // Grocery/e-commerce delivery platforms (Redmart etc.) send a completion
+  // notice rather than a confirmation — "your order is completed" — which
+  // none of the phrasing above matches, so the email never reached Gmail's
+  // search results at all, let alone the looksLikeReceipt check below.
+  '"order completed"', '"order is completed"', '"order confirmed"', '"order delivered"', '"delivery confirmation"',
   'itinerary', '"flight itinerary"', '"travel itinerary"', '"booking confirmation"', '"e-ticket"', '"air ticket"',
   'paynow', '"pay now"', 'paylah', '"fund transfer"', '"funds transfer"', '"bank transfer"',
   '"fast transfer"', '"transfer successful"', '"successful transfer"', '"payment alert"', '"transaction alert"',
@@ -43,7 +48,9 @@ const QUERY_TERMS = [
 
 const RECEIPT_TERMS = [
   'receipt', 'invoice', 'bill', 'tax invoice', 'payment confirmation', 'payment received',
-  'order confirmation', 'booking confirmation', 'flight itinerary', 'travel itinerary',
+  'order confirmation', 'order completed', 'order is completed', 'order confirmed',
+  'order delivered', 'delivery confirmation',
+  'booking confirmation', 'flight itinerary', 'travel itinerary',
   'itinerary', 'e-ticket', 'air ticket', 'amount paid', 'total paid'
 ]
 
