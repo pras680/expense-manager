@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
 import {
   getGmailConnection,
@@ -140,6 +140,13 @@ export function GmailSetupPage() {
               Disconnect
             </button>
           </div>
+
+          <Link
+            to="/settings/gmail/log"
+            className="mt-3 block text-sm text-teal-700 dark:text-teal-400"
+          >
+            View scan log →
+          </Link>
         </div>
       ) : (
         <div className="mt-4">

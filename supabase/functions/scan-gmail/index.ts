@@ -282,6 +282,15 @@ async function scanForUser(
     body: JSON.stringify({ last_scan_at: new Date().toISOString(), last_error: null })
   })
 
+  // Keep the diagnostic log bounded — 90 days is far past what a "why didn't
+  // this show up" investigation needs, and this runs once per user per tick
+  // rather than once per message.
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+  await fetch(
+    `${SUPABASE_URL}/rest/v1/gmail_scan_log?user_id=eq.${conn.user_id}&scanned_at=lt.${cutoff}`,
+    { method: 'DELETE', headers: { ...headers, Prefer: 'return=minimal' } }
+  ).catch(() => {})
+
   return out
 }
 
@@ -343,7 +352,9 @@ async function processMessage(
   headers: RestHeaders
 ): Promise<'imported' | 'skipped' | 'failed'> {
   // Already imported? gmail_message_id is unique per user, so this is the
-  // authoritative guard against re-importing on the overlapping window.
+  // authoritative guard against re-importing on the overlapping window. Not
+  // logged: this fires every run for the same handful of messages in the
+  // overlap window, and "already have this one" isn't a finding.
   const seen = await fetch(
     `${SUPABASE_URL}/rest/v1/receipts?select=id&gmail_message_id=eq.${messageId}&user_id=eq.${owner.userId}&limit=1`,
     { headers }
@@ -355,6 +366,8 @@ async function processMessage(
 
   let rawText = ''
   let receivedISO = new Date().toISOString()
+  let subject = ''
+  let sender = ''
   try {
     const resp = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
@@ -363,8 +376,8 @@ async function processMessage(
     if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`)
     const msg = await resp.json()
     const payload = msg.payload ?? {}
-    const subject = headerValue('subject', payload.headers) ?? 'Gmail receipt'
-    const sender = headerValue('from', payload.headers) ?? 'Unknown sender'
+    subject = headerValue('subject', payload.headers) ?? 'Gmail receipt'
+    sender = headerValue('from', payload.headers) ?? 'Unknown sender'
     const emailDate = headerValue('date', payload.headers) ?? ''
     const body = extractText(payload) || msg.snippet || ''
     if (msg.internalDate) receivedISO = new Date(Number(msg.internalDate)).toISOString()
@@ -373,11 +386,19 @@ async function processMessage(
     rawText = `Email Subject: ${subject}\nEmail From: ${sender}\nEmail Date: ${emailDate}\n\n${body}`
       .slice(0, MAX_RAW_TEXT_CHARS)
   } catch (err) {
+    // No subject/sender yet — the fetch that would have gotten them is what
+    // failed — so the log entry is necessarily bare beyond the message id.
+    await logScan(owner.userId, messageId, null, null, null,
+      'Could not fetch this email from Gmail.', headers)
     console.error(`Gmail message ${messageId} fetch failed: ${err instanceof Error ? err.message : err}`)
     return 'failed'
   }
 
-  if (!looksLikeReceipt(rawText.toLowerCase())) return 'skipped'
+  if (!looksLikeReceipt(rawText.toLowerCase())) {
+    await logScan(owner.userId, messageId, subject, sender, receivedISO,
+      "Didn't look like a receipt or payment alert (no matching keywords + amount).", headers)
+    return 'skipped'
+  }
 
   let parsed: Record<string, unknown>
   try {
@@ -392,13 +413,19 @@ async function processMessage(
     if (!parseResp.ok) throw new Error(`parse-receipt HTTP ${parseResp.status}`)
     parsed = await parseResp.json()
   } catch (err) {
+    await logScan(owner.userId, messageId, subject, sender, receivedISO,
+      'The receipt parser failed to read this email.', headers)
     console.error(`parse failed for ${messageId}: ${err instanceof Error ? err.message : err}`)
     return 'failed'
   }
 
   const merchant = typeof parsed.merchant === 'string' ? parsed.merchant.trim() : ''
   const totalRaw = typeof parsed.total === 'number' ? parsed.total : Number(parsed.total)
-  if (!merchant || !Number.isFinite(totalRaw) || totalRaw <= 0) return 'skipped'
+  if (!merchant || !Number.isFinite(totalRaw) || totalRaw <= 0) {
+    await logScan(owner.userId, messageId, subject, sender, receivedISO,
+      'Looked like a receipt, but no merchant or amount could be read from it.', headers)
+    return 'skipped'
+  }
 
   const receiptCurrency = (typeof parsed.currency === 'string' && parsed.currency) || owner.defaultCurrency
   const category = (typeof parsed.category === 'string' && parsed.category) || 'Miscellaneous'
@@ -450,11 +477,15 @@ async function processMessage(
     if (dupResp.ok) {
       const dupRows = await dupResp.json()
       const needle = merchant.toLowerCase()
-      const match = Array.isArray(dupRows) && dupRows.some((r: { merchant?: string | null }) => {
+      const matchRow = Array.isArray(dupRows) && dupRows.find((r: { merchant?: string | null }) => {
         const other = (r.merchant ?? '').toLowerCase()
         return other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))
       })
-      if (match) return 'skipped'
+      if (matchRow) {
+        await logScan(owner.userId, messageId, subject, sender, receivedISO,
+          `Matched an existing receipt from "${matchRow.merchant ?? 'another source'}" — treated as a duplicate.`, headers)
+        return 'skipped'
+      }
     }
   } catch (_err) {
     // A failed duplicate check shouldn't block a legitimate import.
@@ -495,12 +526,46 @@ async function processMessage(
     body: JSON.stringify(body)
   })
   if (!insert.ok) {
-    // A unique violation here means a concurrent run already imported it.
+    // A unique violation here means a concurrent run already imported it —
+    // not logged, for the same reason the earlier "already imported" check
+    // isn't: it's not a finding, it's this same message racing itself.
     if (insert.status === 409) return 'skipped'
+    await logScan(owner.userId, messageId, subject, sender, receivedISO,
+      'Parsed successfully, but saving the receipt failed.', headers)
     console.error(`insert failed for ${messageId}: ${insert.status} ${(await insert.text()).slice(0, 200)}`)
     return 'failed'
   }
   return 'imported'
+}
+
+// Diagnostic trail for "why didn't this email become a receipt" — see
+// multiuser-11-gmail-scan-log.sql. Best-effort: a logging failure must never
+// take down the scan itself, so this never throws.
+async function logScan(
+  userId: string,
+  messageId: string,
+  subject: string | null,
+  sender: string | null,
+  emailDate: string | null,
+  reason: string,
+  headers: RestHeaders
+): Promise<void> {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/gmail_scan_log`, {
+      method: 'POST',
+      headers: { ...headers, Prefer: 'return=minimal' },
+      body: JSON.stringify({
+        user_id: userId,
+        message_id: messageId,
+        subject,
+        sender,
+        email_date: emailDate,
+        reason
+      })
+    })
+  } catch (_err) {
+    // Never block the scan on a logging failure.
+  }
 }
 
 async function recordError(userId: string, message: string, headers: RestHeaders) {

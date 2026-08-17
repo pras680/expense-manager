@@ -576,3 +576,47 @@ export async function getGmailConnection(): Promise<GmailConnection | null> {
     lastError: row.last_error
   }
 }
+
+// ---------------------------------------------------------------------------
+// Gmail scan log — diagnostic trail of emails scan-gmail found and rejected,
+// with the reason. Not every email it looked at: RLS scopes this to the
+// caller's own mailbox, same as gmail_connections.
+// ---------------------------------------------------------------------------
+
+export interface GmailScanLogEntry {
+  id: string
+  subject: string | null
+  sender: string | null
+  emailDate: string | null
+  reason: string
+  scannedAt: string
+}
+
+export async function getGmailScanLog(limit = 50): Promise<GmailScanLogEntry[]> {
+  const resp = await authorizedFetch(
+    `${REST_URL}/gmail_scan_log?select=id,subject,sender,email_date,reason,scanned_at` +
+    `&order=scanned_at.desc&limit=${limit}`
+  )
+  if (!resp.ok) return []
+  const rows = await resp.json()
+  if (!Array.isArray(rows)) return []
+  return rows.map((row) => ({
+    id: row.id,
+    subject: row.subject,
+    sender: row.sender,
+    emailDate: row.email_date,
+    reason: row.reason,
+    scannedAt: row.scanned_at
+  }))
+}
+
+export async function clearGmailScanLog(): Promise<void> {
+  // PostgREST requires an explicit filter on DELETE; user_id is NOT NULL, so
+  // this matches every row the caller can see — which RLS has already scoped
+  // to their own log — without needing to know individual ids up front.
+  const resp = await authorizedFetch(`${REST_URL}/gmail_scan_log?user_id=not.is.null`, {
+    method: 'DELETE',
+    headers: { Prefer: 'return=minimal' }
+  })
+  await throwIfNotOk(resp, 'Clear scan log failed')
+}
