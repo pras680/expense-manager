@@ -6,6 +6,7 @@ import {
   startGmailConnect,
   completeGmailConnect,
   disconnectGmail,
+  scanGmailNow,
   type GmailConnection
 } from '../lib/supabaseClient'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -25,6 +26,8 @@ export function GmailSetupPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [scanning, setScanning] = useState(false)
+  const [scanMessage, setScanMessage] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -75,6 +78,21 @@ export function GmailSetupPage() {
     }
   }
 
+  async function handleScanNow() {
+    setScanning(true)
+    setError(null)
+    setScanMessage(null)
+    try {
+      await scanGmailNow()
+      setScanMessage('Scan complete — check the list for anything new.')
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setScanning(false)
+    }
+  }
+
   async function handleDisconnect() {
     setBusy(true)
     try {
@@ -93,7 +111,8 @@ export function GmailSetupPage() {
       <PageHeader title="Gmail import" backTo="/settings" />
       <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
         Connect your inbox and receipts from emailed bills and payment alerts are added
-        automatically, every 15 minutes. Read-only — nothing is ever sent or deleted.
+        automatically, twice a day. Read-only — nothing is ever sent or deleted. Use
+        "Scan now" below for anything you want picked up sooner.
       </p>
 
       {error && (
@@ -124,7 +143,21 @@ export function GmailSetupPage() {
             </div>
           )}
 
-          <div className="mt-3 flex gap-2">
+          {scanMessage && (
+            <div className="mt-3 rounded-lg bg-teal-50 px-3 py-2 text-xs text-teal-800 dark:bg-teal-950 dark:text-teal-300">
+              {scanMessage}
+            </div>
+          )}
+
+          <button
+            onClick={handleScanNow}
+            disabled={scanning || busy}
+            className="mt-3 w-full rounded-lg bg-teal-700 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {scanning ? 'Scanning…' : 'Scan now'}
+          </button>
+
+          <div className="mt-2 flex gap-2">
             <button
               onClick={handleConnect}
               disabled={busy}

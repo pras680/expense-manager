@@ -1,12 +1,14 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 
-// Scheduled Gmail receipt scanner — the server-side replacement for the iOS
-// app's GmailReceiptScanner, which only ran while that app was open.
+// Gmail receipt scanner — the server-side replacement for the iOS app's
+// GmailReceiptScanner, which only ran while that app was open. Two triggers:
+// the twice-daily cron (schedule-scan-gmail-cron.sql), which runs it for
+// every connected household member in turn, and the webapp's "Scan now"
+// button (Settings > Gmail import), which runs it for just the caller's own
+// mailbox — see isCron/callerId below.
 //
-// Runs for every connected household member in turn, using each person's own
-// refresh token, so a receipt from sumi's mailbox is owned by sumi. The search
-// query and the receipt/payment-alert keyword filters below are ported verbatim
-// from GmailReceiptScanner.swift so results match what the iOS app produced.
+// Each person's own refresh token is used, so a receipt from sumi's mailbox
+// is owned by sumi.
 //
 // Imported receipts land with source='gmail' and reviewed_at=null, i.e. in the
 // web app's "needs check" queue — nobody has verified the LLM's reading of them.
@@ -201,6 +203,25 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
+// For the manual "Scan now" button: identifies a normal signed-in caller
+// (role=authenticated) so their request can be scoped to their own mailbox
+// only, never anyone else's. Safe to trust the token's own claims here
+// because the function is deployed with verify_jwt=true — Supabase's gateway
+// has already checked the signature and expiry before this code runs.
+function callerUserId(req: Request): string | null {
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim()
+  const segments = token.split('.')
+  if (segments.length !== 3) return null
+  try {
+    const payload = segments[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=')
+    const claims = JSON.parse(atob(padded))
+    return claims?.role === 'authenticated' && typeof claims?.sub === 'string' ? claims.sub : null
+  } catch {
+    return null
+  }
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405, { Allow: 'POST, OPTIONS' })
@@ -209,10 +230,14 @@ serve(async (req) => {
     return json({ error: 'scan-gmail is not configured' }, 500)
   }
 
-  // Cron-only, same reasoning as process-sms-inbox: verify_jwt alone would let
-  // anyone holding the public anon key drive this.
+  // Two ways in: the cron job (service_role — verify_jwt alone would let
+  // anyone holding the public anon key drive this, since that's also a valid
+  // JWT), or a normal signed-in user hitting the "Scan now" button — scoped
+  // below to that one person's own mailbox, never the whole household's.
   const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim()
-  if (!timingSafeEqual(bearer, SUPABASE_SERVICE_ROLE_KEY) && jwtRole(bearer) !== 'service_role') {
+  const isCron = timingSafeEqual(bearer, SUPABASE_SERVICE_ROLE_KEY) || jwtRole(bearer) === 'service_role'
+  const callerId = isCron ? null : callerUserId(req)
+  if (!isCron && !callerId) {
     return json({ error: 'Unauthorized' }, 401)
   }
 
@@ -220,12 +245,27 @@ serve(async (req) => {
   const summary: Record<string, unknown>[] = []
 
   try {
-    const connResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/gmail_connections?select=user_id,email,last_scan_at&revoked_at=is.null`,
-      { headers }
-    )
+    const connUrl = isCron
+      ? `${SUPABASE_URL}/rest/v1/gmail_connections?select=user_id,email,last_scan_at&revoked_at=is.null`
+      : `${SUPABASE_URL}/rest/v1/gmail_connections?select=user_id,email,last_scan_at&revoked_at=is.null&user_id=eq.${callerId}`
+    const connResp = await fetch(connUrl, { headers })
     if (!connResp.ok) throw new Error(`gmail_connections fetch failed: ${connResp.status}`)
     const connections = await connResp.json()
+
+    if (!isCron) {
+      if (connections.length === 0) {
+        return json({ error: 'No Gmail connection found for your account.' }, 404)
+      }
+      // Cooldown against a double-tap or repeated clicks re-running seconds
+      // apart and paying for LLM calls on a diff that hasn't changed yet.
+      const lastScanAt = connections[0].last_scan_at
+      if (lastScanAt) {
+        const secondsSince = (Date.now() - new Date(lastScanAt).getTime()) / 1000
+        if (secondsSince < 60) {
+          return json({ error: `Already scanned ${Math.ceil(secondsSince)}s ago — try again in a moment.` }, 429)
+        }
+      }
+    }
 
     for (const conn of connections) {
       summary.push(await scanForUser(conn, headers))

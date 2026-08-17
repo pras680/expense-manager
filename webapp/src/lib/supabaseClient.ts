@@ -577,6 +577,22 @@ export async function getGmailConnection(): Promise<GmailConnection | null> {
   }
 }
 
+/**
+ * Triggers scan-gmail for the caller's own mailbox only — not the cron path,
+ * which scans every connected household member. The function enforces the
+ * same scoping server-side from the caller's own JWT, so this can't be used
+ * to trigger anyone else's scan even if the request were tampered with.
+ */
+export async function scanGmailNow(): Promise<void> {
+  const resp = await authorizedFetch(`${FUNCTIONS_URL}/scan-gmail`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  const data = await resp.json().catch(() => ({}))
+  if (!resp.ok) throw new Error(data?.error ?? `Scan failed (HTTP ${resp.status})`)
+}
+
 // ---------------------------------------------------------------------------
 // Gmail scan log — diagnostic trail of emails scan-gmail found and rejected,
 // with the reason. Not every email it looked at: RLS scopes this to the
