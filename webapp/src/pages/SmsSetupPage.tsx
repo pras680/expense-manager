@@ -121,26 +121,52 @@ export function SmsSetupPage() {
           </div>
 
           <div className="mt-4 border-t border-teal-200 pt-3 text-xs text-teal-900 dark:border-teal-800 dark:text-teal-200">
+            {/* Manual setup leads: recent iOS builds have started rejecting an
+                unsigned .shortcut file outright ("Unsigned Shortcuts is Not
+                Supported"), with no "Allow Untrusted Shortcuts" toggle offered
+                at all — the download button below isn't reliable enough to be
+                the primary instructions any more. Building it natively inside
+                Shortcuts always works, since nothing is being imported. */}
             <p className="font-semibold">iPhone setup</p>
-            <button
-              onClick={() => downloadSmsShortcut(`${env.supabaseUrl}/functions/v1/receive-sms`, newToken)}
-              className="mt-2 rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
-            >
-              Download Shortcut
-            </button>
             <ol className="mt-2 list-decimal space-y-1 pl-4">
-              <li>Open the downloaded file → <strong>Add Shortcut</strong>. (First time only: if nothing happens, go to Settings → Shortcuts and enable "Allow Untrusted Shortcuts" — it only appears there right after a blocked attempt, and only for a few minutes — then try the download again.)</li>
-              <li>Shortcuts app → Automation → new automation → <strong>Message</strong> → received from your bank.</li>
-              <li>Add action <strong>Run Shortcut</strong> → choose <strong>SMS Import</strong> (the one you just added).</li>
+              <li>Shortcuts app → <strong>+</strong> for a new shortcut → add action <strong>Get Contents of URL</strong>.</li>
+              <li>
+                URL: <code className="break-all">{env.supabaseUrl}/functions/v1/receive-sms</code>
+              </li>
+              <li>
+                <strong>Show More</strong> → Method <strong>POST</strong> → Headers: add{' '}
+                <code>Content-Type</code> = <code>application/json</code>, and{' '}
+                <code>x-sms-ingest-secret</code> = the token above.
+              </li>
+              <li>
+                Request Body: <strong>JSON</strong>, one field named <code>body</code> — set its
+                value to the <strong>Shortcut Input</strong> variable, not typed text (tap the
+                value field and pick it from the variable list).
+              </li>
+              <li>Name it (e.g. "SMS Import") and save.</li>
+              <li>Automation tab → <strong>+</strong> → <strong>Message</strong> → received from your bank → <strong>Run Shortcut</strong> → pick the one you just made.</li>
               <li>Turn off "Ask Before Running".</li>
             </ol>
-            <p className="mt-2 text-[11px] text-teal-800/80 dark:text-teal-300/80">
-              Didn't work? Fall back to building it manually: <strong>Get Contents of URL</strong> →
-              URL <code className="break-all">{env.supabaseUrl}/functions/v1/receive-sms</code> →
-              Method <strong>POST</strong>, Request Body <strong>JSON</strong> with a <code>body</code> field set to
-              the message text, headers <code>Content-Type: application/json</code> and{' '}
-              <code>x-sms-ingest-secret</code> set to the token above.
-            </p>
+
+            <details className="mt-3">
+              <summary className="cursor-pointer text-[11px] font-medium text-teal-800/80 dark:text-teal-300/80">
+                Prefer not to build it by hand? Try the downloadable version (works on some
+                devices, not others)
+              </summary>
+              <button
+                onClick={() => downloadSmsShortcut(`${env.supabaseUrl}/functions/v1/receive-sms`, newToken)}
+                className="mt-2 rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100"
+              >
+                Download Shortcut
+              </button>
+              <p className="mt-2 text-[11px] text-teal-800/80 dark:text-teal-300/80">
+                Open the downloaded file → <strong>Add Shortcut</strong>. If iOS blocks it, check
+                Settings → Shortcuts for "Allow Untrusted Shortcuts" (only appears for a few
+                minutes right after a blocked attempt). If it says "Unsigned Shortcuts is Not
+                Supported" instead, with no toggle offered, your iOS version has closed this
+                path entirely — use the manual steps above instead.
+              </p>
+            </details>
           </div>
         </div>
       )}
