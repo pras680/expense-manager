@@ -79,25 +79,44 @@ export function AddReceiptPage() {
   const [error, setError] = useState<string | null>(null)
   const [formValues, setFormValues] = useState<ReceiptFormValues | null>(null)
 
-  async function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
 
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+
     setError(null)
     setBusy(true)
     try {
-      setBusyLabel('Preparing photo…')
-      const compressed = await compressImage(file)
+      // A PDF isn't an image parse-receipt can read directly — render its
+      // first page to a canvas, then treat that exactly like a camera photo
+      // from here on. Receipts are effectively always one page.
+      //
+      // Dynamically imported: pdf.js is a ~250KB (gzipped) dependency that
+      // only a PDF upload ever needs. A static import pulled it into the
+      // main bundle for every page load, on a PWA whose whole premise is a
+      // lean install on a phone — this way it's its own chunk, fetched only
+      // when someone actually picks a PDF.
+      setBusyLabel(isPdf ? 'Reading PDF…' : 'Preparing photo…')
+      const source = isPdf
+        ? await (await import('../lib/pdfUtils')).renderPdfFirstPageToBlob(file)
+        : file
+      const compressed = await compressImage(source)
       const previewUrl = URL.createObjectURL(compressed)
       setImagePreviewUrl(previewUrl)
 
       setBusyLabel('Reading receipt…')
       const base64 = await blobToBase64(compressed)
+      // What's actually uploaded is always a JPEG (the rendered page, for a
+      // PDF) — naming it receipt.pdf would be a lie about the stored bytes.
+      const filenameHint = isPdf
+        ? file.name.replace(/\.pdf$/i, '.jpg') || 'receipt.jpg'
+        : (file.name || 'receipt.jpg')
       const [fileUrl, parsed] = await Promise.all([
         // The uid prefix is what the storage policies authorize against, so the
         // upload cannot be attributed after the fact — it has to be passed here.
-        uploadReceiptImage(compressed, file.name || 'receipt.jpg', session!.userId),
+        uploadReceiptImage(compressed, filenameHint, session!.userId),
         parseReceiptImage(base64, 'image/jpeg').catch((err) => {
           setError(err instanceof Error ? err.message : String(err))
           return null
@@ -178,8 +197,12 @@ export function AddReceiptPage() {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
-              onChange={handlePhotoSelected}
+              // Listing application/pdf alongside image/* is also what makes
+              // iOS Safari show "Browse" (Files app / iCloud Drive) in the
+              // picker — accept="image/*" alone limits it to Camera and
+              // Photo Library and hides filesystem access entirely.
+              accept="image/*,application/pdf"
+              onChange={handleFileSelected}
               className="hidden"
             />
             {imagePreviewUrl && (
@@ -190,10 +213,10 @@ export function AddReceiptPage() {
               disabled={busy}
               className="w-full rounded-lg bg-teal-700 py-3 text-base font-semibold text-white disabled:opacity-60"
             >
-              {busy ? busyLabel || 'Working…' : imagePreviewUrl ? 'Retake / Choose Different Photo' : '📷 Take Photo or Upload'}
+              {busy ? busyLabel || 'Working…' : imagePreviewUrl ? 'Retake / Choose Different File' : '📷 Take Photo or Upload'}
             </button>
             <p className="text-center text-xs text-neutral-500 dark:text-neutral-400">
-              Works with your camera or photo library, on iPhone and Android.
+              Photo or PDF — from your camera, photo library, or files, on iPhone and Android.
             </p>
           </div>
         ) : (

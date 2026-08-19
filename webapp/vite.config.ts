@@ -27,7 +27,14 @@ export default defineConfig({
       workbox: {
         // App-shell precaching only — never cache Supabase REST/Edge Function
         // responses, receipts data must always be fetched fresh.
-        navigateFallbackDenylist: [/^\/rest\//, /^\/functions\//]
+        navigateFallbackDenylist: [/^\/rest\//, /^\/functions\//],
+        // pdfUtils is dynamically imported specifically so pdf.js (~130KB
+        // gzipped, plus its ~1.2MB worker) only downloads for someone who
+        // actually picks a PDF. Workbox's default globPatterns precache
+        // every built JS chunk regardless of how it's loaded, which would
+        // silently re-download it for every visitor on install and defeat
+        // the entire reason it's split out.
+        globIgnores: ['**/pdfUtils-*.js']
       }
     })
   ]

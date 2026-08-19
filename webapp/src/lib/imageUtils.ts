@@ -5,7 +5,11 @@ const JPEG_QUALITY = 0.82
 // iOS Safari and Android Chrome) so phone camera photos (often 3-8MB) stay
 // well under both the Storage upload size and the parse-receipt request body
 // limit, and to keep Gemini's per-request image tokens/cost down.
-export async function compressImage(file: File): Promise<Blob> {
+//
+// Takes a Blob rather than a File so a PDF page rendered to canvas
+// (pdfUtils.renderPdfFirstPageToBlob) can run through the exact same
+// resize/encode path as a camera photo — one sizing policy, not two.
+export async function compressImage(file: Blob): Promise<Blob> {
   const bitmap = await createImageBitmap(file)
   const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height))
   const width = Math.round(bitmap.width * scale)
