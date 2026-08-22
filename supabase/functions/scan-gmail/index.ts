@@ -123,18 +123,35 @@ interface GmailPart {
   headers?: { name: string; value: string }[]
 }
 
+// Marketing-template receipts (Lazada order confirmations, Stripe-hosted
+// invoices) route every nav link and unsubscribe footer through a tracking
+// redirect with a huge query string — individually harmless, but dozens of
+// them together can dominate the character budget before real content ever
+// gets a chance to be truncated out. None of it is ever receipt information.
+function collapseLongUrls(text: string): string {
+  return text.replace(/https?:\/\/\S{60,}/g, '[link]')
+}
+
 function extractText(payload: GmailPart): string {
-  const pieces: string[] = []
-  if (payload.mimeType === 'text/plain' && payload.body?.data) {
-    pieces.push(base64UrlDecode(payload.body.data))
-  } else if (payload.mimeType === 'text/html' && payload.body?.data) {
-    pieces.push(stripHtml(base64UrlDecode(payload.body.data)))
+  const plainPieces: string[] = []
+  const htmlPieces: string[] = []
+  function walk(part: GmailPart) {
+    if (part.mimeType === 'text/plain' && part.body?.data) {
+      plainPieces.push(base64UrlDecode(part.body.data))
+    } else if (part.mimeType === 'text/html' && part.body?.data) {
+      htmlPieces.push(stripHtml(base64UrlDecode(part.body.data)))
+    }
+    for (const child of part.parts ?? []) walk(child)
   }
-  for (const part of payload.parts ?? []) {
-    const t = extractText(part)
-    if (t) pieces.push(t)
-  }
-  return pieces.join('\n')
+  walk(payload)
+  // multipart/alternative means "pick one representation, not both" — text/plain
+  // says the same thing in a fraction of the characters. The previous code
+  // concatenated every part it found, which silently doubled the size of every
+  // email that included both (nearly all of them) and was consuming truncation
+  // budget on a second, HTML-derived copy of content already captured above.
+  // HTML is only used when a sender omits the plain part entirely.
+  const text = plainPieces.length > 0 ? plainPieces.join('\n') : htmlPieces.join('\n')
+  return collapseLongUrls(text)
 }
 
 function headerValue(name: string, headers?: { name: string; value: string }[]): string | null {
