@@ -566,7 +566,7 @@ async function processMessage(
     const from = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString()
     const to = new Date(d.getTime() + 24 * 60 * 60 * 1000).toISOString()
     const dupResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/receipts?select=id,merchant&${scope}` +
+      `${SUPABASE_URL}/rest/v1/receipts?select=id,merchant,date,card_bank,card_last4&${scope}` +
       `&total=gte.${(converted - 0.01).toFixed(2)}&total=lte.${(converted + 0.01).toFixed(2)}` +
       `&date=gte.${from}&date=lte.${to}&limit=10`,
       { headers }
@@ -574,9 +574,19 @@ async function processMessage(
     if (dupResp.ok) {
       const dupRows = await dupResp.json()
       const needle = merchant.toLowerCase()
-      const matchRow = Array.isArray(dupRows) && dupRows.find((r: { merchant?: string | null }) => {
+      const cardKey = cardBank && cardLast4 ? `${cardBank.toLowerCase()}|${cardLast4}` : null
+      const matchRow = Array.isArray(dupRows) && dupRows.find((r: { merchant?: string | null; date?: string | null; card_bank?: string | null; card_last4?: string | null }) => {
         const other = (r.merchant ?? '').toLowerCase()
-        return other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))
+        if (other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))) return true
+        // Merchant text disagrees between sources more often than it should — e.g. an
+        // SMS names the actual merchant ("Transit") while the bank's own email names
+        // the bank instead ("UOB"), for the same charge. Same card + same amount + same
+        // calendar date is an independent signal strong enough to catch that case even
+        // when merchant text shares nothing.
+        if (cardKey && r.card_bank && r.card_last4 && r.date === normalizedDate) {
+          return `${r.card_bank.toLowerCase()}|${r.card_last4}` === cardKey
+        }
+        return false
       })
       if (matchRow) {
         await logScan(owner.userId, messageId, subject, sender, receivedISO,
