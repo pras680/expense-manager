@@ -6,3 +6,9 @@ xcuserdata/
 .env
 .env.local
 node_modules/
+
+# notebooks/ — local analysis venv and secrets, never shipped or shared
+notebooks/.venv/
+notebooks/.env
+notebooks/.ipynb_checkpoints/
+
