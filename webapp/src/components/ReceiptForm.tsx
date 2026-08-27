@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { EXPENSE_CATEGORIES, COMMON_CURRENCIES, TRANSFER_KINDS } from '../lib/categories'
 import { convertCurrency } from '../lib/currency'
-import { findPaymentMethod } from '../lib/supabaseClient'
+import { findPaymentMethod, learnReceiptCorrection } from '../lib/supabaseClient'
 import type { ReceiptWriteInput } from '../lib/supabaseClient'
 import type { ReceiptVisibility, ReceiptSource } from '../types/receipt'
+import { useSettings } from '../hooks/useSettings'
 
 const LOCAL_TRANSFER_CATEGORY = 'Local Transfer'
 
@@ -23,6 +24,8 @@ export interface ReceiptFormValues {
   fileUrl: string | null
   visibility: ReceiptVisibility
   source: ReceiptSource
+  /** Auto-filled from the parser's one-liner; freely editable. */
+  comment: string
 }
 
 interface ReceiptFormProps {
@@ -41,6 +44,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const isTransfer = values.category === LOCAL_TRANSFER_CATEGORY
+  const { householdId } = useSettings()
 
   function set<K extends keyof ReceiptFormValues>(key: K, value: ReceiptFormValues[K]) {
     setValues((v) => ({ ...v, [key]: value }))
@@ -95,10 +99,36 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
         lineItems: values.lineItems,
         fileUrl: values.fileUrl,
         visibility: values.visibility,
-        source: values.source
+        source: values.source,
+        comment: values.comment
       }
 
       await onSubmit(input)
+
+      // Fire-and-forget: teaches future parses from this merchant, but a
+      // failure here must never make an otherwise-successful save look
+      // like it failed (learnReceiptCorrection already catches its own
+      // errors internally).
+      learnReceiptCorrection(
+        householdId,
+        {
+          merchant: initial.merchant,
+          category: initial.category,
+          receiptCurrency: initial.receiptCurrency,
+          cardLast4: initial.cardLast4,
+          cardBank: initial.cardBank,
+          rawText: initial.rawText
+        },
+        {
+          merchant,
+          category: values.category || 'Miscellaneous',
+          receiptCurrency,
+          cardLast4: values.cardLast4 ? values.cardLast4.replace(/[^0-9]/g, '').slice(-4) : '',
+          cardBank: values.cardBank || '',
+          rawText: values.rawText
+        },
+        values.comment
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -281,6 +311,21 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
           What the SMS, email, or photo actually said — check the fields above against this before saving.
         </p>
       </div>
+
+      <label className="flex flex-col gap-1">
+        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Comment</span>
+        <textarea
+          value={values.comment}
+          onChange={(e) => set('comment', e.target.value)}
+          rows={2}
+          placeholder="How these values were derived — add your own notes here"
+          className="rounded-lg border border-neutral-300 px-3 py-2.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+        />
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Auto-filled with the parser's reasoning; edit freely. Saving with a changed field or a note here helps
+          future receipts from this merchant get parsed correctly.
+        </p>
+      </label>
 
       <div className="flex flex-col gap-1">
         <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Visibility</span>

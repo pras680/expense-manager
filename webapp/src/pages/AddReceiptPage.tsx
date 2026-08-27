@@ -40,7 +40,8 @@ function valuesFromParsed(parsed: ParsedReceipt, rawText: string, fileUrl: strin
     ),
     fileUrl,
     visibility: 'household',
-    source: fileUrl ? 'photo' : 'manual'
+    source: fileUrl ? 'photo' : 'manual',
+    comment: parsed.derivation_note ?? ''
   }
 }
 
@@ -60,7 +61,8 @@ function emptyFormValues(rawText: string, fileUrl: string | null = null): Receip
     lineItems: [],
     fileUrl,
     visibility: 'household',
-    source: fileUrl ? 'photo' : 'manual'
+    source: fileUrl ? 'photo' : 'manual',
+    comment: ''
   }
 }
 

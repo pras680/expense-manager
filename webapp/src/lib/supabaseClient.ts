@@ -75,7 +75,7 @@ function isMissingColumnError(message: string): boolean {
 // so there's no reason to ever request them here (unlike insert/update, which
 // still probe for them in case the schema changes and fall back on a miss).
 const RECEIPTS_SELECT =
-  'id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,category,user_id,household_id,visibility,source,reviewed_at'
+  'id,merchant,date,total,currency,file_url,raw_ocr_json,card_last4,card_bank,category,user_id,household_id,visibility,source,reviewed_at,comment'
 
 export async function listReceipts(): Promise<Receipt[]> {
   // RLS decides what comes back: own rows plus household-shared ones. No client
@@ -110,6 +110,7 @@ export interface ReceiptWriteInput {
   visibility: 'private' | 'household'
   /** Preserve the original provenance on edit — an SMS receipt stays 'sms'. */
   source?: ReceiptSource
+  comment: string
 }
 
 function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: boolean) {
@@ -124,6 +125,7 @@ function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: bool
     file_url: input.fileUrl,
     visibility: input.visibility,
     source: input.source ?? 'manual',
+    comment: input.comment || null,
     // A receipt the user typed or corrected by hand needs no separate review
     // step — filling the form IS the review.
     reviewed_at: new Date().toISOString(),
@@ -459,6 +461,95 @@ export async function createSmsToken(label: string | null): Promise<string> {
   const token = await resp.json()
   if (typeof token !== 'string' || !token) throw new Error('Create SMS token: unexpected response')
   return token
+}
+
+// ---------------------------------------------------------------------------
+// Learned corrections (see receipt_correction_rules in
+// multiuser-14-receipt-comment-and-learning.sql) — mirrors the keyword
+// normalization from ExpenseManager/ReceiptStore.swift's
+// normalizedMerchantKey/normalizedKey so a keyword learned from an iOS
+// correction and one learned here can still land on the same rule.
+// ---------------------------------------------------------------------------
+
+const CORRECTION_KEYWORD_STOP_WORDS = new Set([
+  'email', 'subject', 'from', 'gmail', 'receipt', 'invoice', 'bill', 'payment',
+  'confirmation', 'statement', 'alert', 'notification', 'card', 'credit'
+])
+
+function normalizedCorrectionKey(value: string | null | undefined): string | null {
+  if (!value) return null
+  const tokens = value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .split(' ')
+    .filter((t) => t.length > 0 && !CORRECTION_KEYWORD_STOP_WORDS.has(t))
+  const key = tokens.join(' ').trim()
+  return key === '' || key === 'unknown bank' ? null : key
+}
+
+export interface ReceiptCorrectionSnapshot {
+  merchant: string
+  category: string
+  receiptCurrency: string
+  cardLast4: string
+  cardBank: string
+  rawText: string
+}
+
+/**
+ * Best-effort: called after a receipt is saved, to remember a correction for
+ * next time. Never throws — a failed learning write must not make a
+ * successful save look like it failed.
+ */
+export async function learnReceiptCorrection(
+  householdId: string | null,
+  before: ReceiptCorrectionSnapshot,
+  after: ReceiptCorrectionSnapshot,
+  comment: string
+): Promise<void> {
+  if (!householdId) return
+
+  const norm = (v: string) => v.trim().toLowerCase()
+  const fieldsChanged =
+    norm(before.merchant) !== norm(after.merchant) ||
+    norm(before.category) !== norm(after.category) ||
+    norm(before.receiptCurrency) !== norm(after.receiptCurrency) ||
+    norm(before.cardLast4) !== norm(after.cardLast4) ||
+    norm(before.cardBank) !== norm(after.cardBank)
+
+  const trimmedComment = comment.trim()
+  if (!fieldsChanged && !trimmedComment) return
+
+  const keyword =
+    normalizedCorrectionKey(after.merchant) ??
+    after.rawText
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length >= 3 && line.length <= 60)
+      .map((line) => normalizedCorrectionKey(line))
+      .find((key): key is string => key !== null) ??
+    null
+  if (!keyword) return
+
+  try {
+    const resp = await authorizedFetch(`${REST_URL}/rpc/learn_receipt_correction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        p_household_id: householdId,
+        p_merchant_keyword: keyword,
+        p_corrected_merchant: after.merchant || null,
+        p_corrected_category: after.category || null,
+        p_corrected_currency: after.receiptCurrency || null,
+        p_corrected_card_last4: after.cardLast4 || null,
+        p_corrected_card_bank: after.cardBank || null,
+        p_note: trimmedComment || null
+      })
+    })
+    if (!resp.ok) console.error(`learn_receipt_correction failed: HTTP ${resp.status}`)
+  } catch (err) {
+    console.error('learn_receipt_correction failed', err)
+  }
 }
 
 export async function revokeSmsToken(id: string): Promise<void> {

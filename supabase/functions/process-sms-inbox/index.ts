@@ -241,6 +241,33 @@ serve(async (req) => {
   }
 })
 
+// Household-scoped corrections learned from past edits (see
+// receipt_correction_rules / match_correction_rules in
+// multiuser-14-receipt-comment-and-learning.sql) — passed to parse-receipt
+// as learning_hints so a mistake fixed once (by anyone in the household, on
+// any of the three ingestion paths) doesn't keep repeating for this merchant.
+// Best-effort: a failed lookup must not block parsing a receipt that would
+// otherwise succeed.
+async function fetchCorrectionHints(
+  householdId: string | null,
+  rawText: string,
+  headers: RestHeaders
+): Promise<unknown[]> {
+  if (!householdId) return []
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_correction_rules`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ p_household_id: householdId, p_raw_text: rawText })
+    })
+    if (!resp.ok) return []
+    const hints = await resp.json()
+    return Array.isArray(hints) ? hints : []
+  } catch {
+    return []
+  }
+}
+
 // Currency and household now come from the SMS owner's own settings, replacing
 // the single global app_settings.default_currency row — otherwise one member's
 // currency preference would silently convert everyone else's spending.
@@ -341,6 +368,8 @@ async function processRow(
     return processReversal(row, smsText, headers, owner)
   }
 
+  const learningHints = await fetchCorrectionHints(owner.householdId, smsText, headers)
+
   let parsed: Record<string, unknown>
   try {
     const parseResp = await fetch(`${SUPABASE_URL}/functions/v1/parse-receipt`, {
@@ -350,7 +379,11 @@ async function processRow(
       // own arrival time is a far better anchor for inferring it than the
       // parser's own clock, which has no idea when this particular message
       // was actually sent.
-      body: JSON.stringify({ raw_text: `SMS Expense Alert:\n${smsText}`, reference_date: row.received_at })
+      body: JSON.stringify({
+        raw_text: `SMS Expense Alert:\n${smsText}`,
+        reference_date: row.received_at,
+        learning_hints: learningHints
+      })
     })
     if (!parseResp.ok) {
       const errBody = await parseResp.text()
@@ -361,6 +394,8 @@ async function processRow(
     await markRow(row.id, headers, 'failed', `Parse failed: ${err instanceof Error ? err.message : String(err)}`, null)
     return 'failed'
   }
+
+  const derivationNote = typeof parsed.derivation_note === 'string' ? parsed.derivation_note : null
 
   const merchant = typeof parsed.merchant === 'string' ? parsed.merchant.trim() : ''
   const totalRaw = typeof parsed.total === 'number' ? parsed.total : Number(parsed.total)
@@ -485,6 +520,7 @@ async function processRow(
     currency: defaultCurrency,
     file_url: null,
     raw_ocr_json: rawOcrJson,
+    comment: derivationNote,
     user_id: owner.userId,
     household_id: owner.householdId,
     visibility: 'household',

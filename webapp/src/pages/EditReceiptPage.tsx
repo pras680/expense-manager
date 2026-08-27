@@ -42,7 +42,8 @@ export function EditReceiptPage() {
     lineItems: receipt.lineItems,
     fileUrl: receipt.fileUrl,
     visibility: receipt.visibility,
-    source: receipt.source
+    source: receipt.source,
+    comment: receipt.comment || ''
   }
 
   async function handleSubmit(input: ReceiptWriteInput) {

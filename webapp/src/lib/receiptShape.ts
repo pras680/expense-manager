@@ -96,7 +96,8 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
     visibility: stringValue(row.visibility) === 'private' ? 'private' : 'household',
     source: (['manual', 'photo', 'sms', 'gmail'] as const)
       .find((s) => s === stringValue(row.source)) ?? 'manual',
-    reviewedAt: stringValue(row.reviewed_at)
+    reviewedAt: stringValue(row.reviewed_at),
+    comment: stringValue(row.comment)
   }
 }
 

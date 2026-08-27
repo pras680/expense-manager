@@ -404,6 +404,33 @@ async function accessTokenFor(userId: string, headers: RestHeaders): Promise<str
 
 type OwnerContext = { userId: string; householdId: string | null; defaultCurrency: string }
 
+// Household-scoped corrections learned from past edits (see
+// receipt_correction_rules / match_correction_rules in
+// multiuser-14-receipt-comment-and-learning.sql) — passed to parse-receipt
+// as learning_hints so a mistake fixed once (by anyone in the household, on
+// any of the three ingestion paths) doesn't keep repeating for this merchant.
+// Best-effort: a failed lookup must not block parsing a receipt that would
+// otherwise succeed.
+async function fetchCorrectionHints(
+  householdId: string | null,
+  rawText: string,
+  headers: RestHeaders
+): Promise<unknown[]> {
+  if (!householdId) return []
+  try {
+    const resp = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_correction_rules`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ p_household_id: householdId, p_raw_text: rawText })
+    })
+    if (!resp.ok) return []
+    const hints = await resp.json()
+    return Array.isArray(hints) ? hints : []
+  } catch {
+    return []
+  }
+}
+
 async function loadOwnerContext(userId: string, headers: RestHeaders): Promise<OwnerContext> {
   const fallback: OwnerContext = { userId, householdId: null, defaultCurrency: 'SGD' }
   try {
@@ -485,6 +512,8 @@ async function processMessage(
     return 'skipped'
   }
 
+  const learningHints = await fetchCorrectionHints(owner.householdId, rawText, headers)
+
   let parsed: Record<string, unknown>
   try {
     const parseResp = await fetch(`${SUPABASE_URL}/functions/v1/parse-receipt`, {
@@ -493,7 +522,7 @@ async function processMessage(
       // The email's own internalDate is a far better anchor for inferring a
       // missing year than the parser's own clock — same reasoning as
       // process-sms-inbox's reference_date.
-      body: JSON.stringify({ raw_text: rawText, reference_date: receivedISO })
+      body: JSON.stringify({ raw_text: rawText, reference_date: receivedISO, learning_hints: learningHints })
     })
     if (!parseResp.ok) {
       // A 429 says the LLM provider was rate limited or out of quota at this
@@ -532,6 +561,8 @@ async function processMessage(
     console.error(`parse-receipt unreachable for ${messageId}: ${err instanceof Error ? err.message : err}`)
     return 'failed'
   }
+
+  const derivationNote = typeof parsed.derivation_note === 'string' ? parsed.derivation_note : null
 
   const merchant = typeof parsed.merchant === 'string' ? parsed.merchant.trim() : ''
   const totalRaw = typeof parsed.total === 'number' ? parsed.total : Number(parsed.total)
@@ -629,6 +660,7 @@ async function processMessage(
     visibility: 'household',
     source: 'gmail',
     gmail_message_id: messageId,
+    comment: derivationNote,
     raw_ocr_json: {
       raw_text: rawText,
       extracted_digits: cardLast4 ?? '',

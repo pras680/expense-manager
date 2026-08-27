@@ -31,6 +31,8 @@ export interface Receipt {
   source: ReceiptSource
   /** Null means nobody has verified this auto-imported receipt yet. */
   reviewedAt: string | null
+  /** Auto-filled from the parser's derivation_note, freely editable afterward. */
+  comment: string | null
 }
 
 export interface ParsedReceipt {
@@ -44,6 +46,8 @@ export interface ParsedReceipt {
   category?: string | null
   line_items?: { description?: string; amount?: number }[]
   raw_text?: string | null
+  /** One-liner explaining how the parser derived these values. */
+  derivation_note?: string | null
 }
 
 export interface PaymentMethod {
