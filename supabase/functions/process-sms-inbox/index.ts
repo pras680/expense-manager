@@ -268,6 +268,24 @@ async function fetchCorrectionHints(
   }
 }
 
+// Household-added categories (Settings -> Categories, household_categories
+// table) — passed to parse-receipt so it's allowed to use them, not just the
+// fixed built-in list. Best-effort, same shape as fetchCorrectionHints.
+async function fetchHouseholdCategories(householdId: string | null, headers: RestHeaders): Promise<string[]> {
+  if (!householdId) return []
+  try {
+    const resp = await fetch(
+      `${SUPABASE_URL}/rest/v1/household_categories?household_id=eq.${householdId}&select=name`,
+      { headers }
+    )
+    if (!resp.ok) return []
+    const rows = await resp.json()
+    return Array.isArray(rows) ? rows.map((r: { name?: string }) => r.name).filter((n): n is string => typeof n === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 // Currency and household now come from the SMS owner's own settings, replacing
 // the single global app_settings.default_currency row — otherwise one member's
 // currency preference would silently convert everyone else's spending.
@@ -368,7 +386,10 @@ async function processRow(
     return processReversal(row, smsText, headers, owner)
   }
 
-  const learningHints = await fetchCorrectionHints(owner.householdId, smsText, headers)
+  const [learningHints, householdCategories] = await Promise.all([
+    fetchCorrectionHints(owner.householdId, smsText, headers),
+    fetchHouseholdCategories(owner.householdId, headers)
+  ])
 
   let parsed: Record<string, unknown>
   try {
@@ -382,7 +403,8 @@ async function processRow(
       body: JSON.stringify({
         raw_text: `SMS Expense Alert:\n${smsText}`,
         reference_date: row.received_at,
-        learning_hints: learningHints
+        learning_hints: learningHints,
+        household_categories: householdCategories
       })
     })
     if (!parseResp.ok) {

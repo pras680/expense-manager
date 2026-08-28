@@ -561,6 +561,43 @@ export async function revokeSmsToken(id: string): Promise<void> {
   await throwIfNotOk(resp, 'Revoke SMS token failed')
 }
 
+// ---------------------------------------------------------------------------
+// Household-custom categories (household_categories) — additions layered on
+// top of the fixed EXPENSE_CATEGORIES list, never touching it.
+// ---------------------------------------------------------------------------
+
+export interface HouseholdCategory {
+  id: string
+  name: string
+}
+
+export async function listHouseholdCategories(): Promise<HouseholdCategory[]> {
+  const resp = await authorizedFetch(
+    `${REST_URL}/household_categories?select=id,name&order=created_at.asc`
+  )
+  if (!resp.ok) return []
+  const rows = await resp.json()
+  if (!Array.isArray(rows)) return []
+  return rows.map((r: Record<string, string>) => ({ id: r.id, name: r.name }))
+}
+
+export async function addHouseholdCategory(name: string, householdId: string): Promise<void> {
+  const resp = await authorizedFetch(`${REST_URL}/household_categories`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+    body: JSON.stringify({ name: name.trim(), household_id: householdId })
+  })
+  await throwIfNotOk(resp, 'Add category failed')
+}
+
+export async function deleteHouseholdCategory(id: string): Promise<void> {
+  const resp = await authorizedFetch(`${REST_URL}/household_categories?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: { Prefer: 'return=minimal' }
+  })
+  await throwIfNotOk(resp, 'Delete category failed')
+}
+
 /** Clears the "needs review" flag once a member has confirmed the details. */
 export async function markReceiptsReviewed(ids: string[], userId: string): Promise<void> {
   if (ids.length === 0) return

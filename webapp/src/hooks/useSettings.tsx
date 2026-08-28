@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
-import { getUserSettings, updateUserSettings, listHouseholdMembers, type HouseholdMember } from '../lib/supabaseClient'
+import { getUserSettings, updateUserSettings, listHouseholdMembers, listHouseholdCategories, type HouseholdMember } from '../lib/supabaseClient'
 import { DEFAULT_CURRENCY } from '../lib/categories'
 import { useAuth } from './useAuth'
 
@@ -8,11 +8,15 @@ interface SettingsContextValue {
   displayName: string | null
   householdId: string | null
   members: HouseholdMember[]
+  /** Household-added categories, layered on top of the fixed EXPENSE_CATEGORIES list. */
+  customCategories: string[]
   loading: boolean
   error: string | null
   setDefaultCurrency: (currency: string) => Promise<void>
   /** Re-reads the roster after a member is added or removed. */
   refreshMembers: () => Promise<void>
+  /** Re-reads custom categories after one is added or removed. */
+  refreshCategories: () => Promise<void>
   /** Maps a receipt's user_id to a name for the owner badge. */
   nameFor: (userId: string | null) => string | null
 }
@@ -27,6 +31,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [displayName, setDisplayName] = useState<string | null>(null)
   const [householdId, setHouseholdId] = useState<string | null>(null)
   const [members, setMembers] = useState<HouseholdMember[]>([])
+  const [customCategories, setCustomCategories] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -39,8 +44,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     setError(null)
 
-    Promise.all([getUserSettings(userId), listHouseholdMembers()])
-      .then(([settings, householdMembers]) => {
+    Promise.all([getUserSettings(userId), listHouseholdMembers(), listHouseholdCategories()])
+      .then(([settings, householdMembers, categories]) => {
         if (cancelled) return
         if (settings) {
           setDefaultCurrencyState(settings.defaultCurrency)
@@ -48,6 +53,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           setHouseholdId(settings.activeHouseholdId)
         }
         setMembers(householdMembers)
+        setCustomCategories(categories.map((c) => c.name))
       })
       .catch((err) => {
         // Surfaced rather than swallowed: silently falling back to SGD would
@@ -71,6 +77,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setMembers(await listHouseholdMembers())
   }, [])
 
+  const refreshCategories = useCallback(async () => {
+    setCustomCategories((await listHouseholdCategories()).map((c) => c.name))
+  }, [])
+
   const nameFor = useCallback((id: string | null) => {
     if (!id) return null
     if (id === userId) return 'You'
@@ -80,7 +90,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   return (
     <SettingsContext.Provider
-      value={{ defaultCurrency, displayName, householdId, members, loading, error, setDefaultCurrency, refreshMembers, nameFor }}
+      value={{
+        defaultCurrency, displayName, householdId, members, customCategories, loading, error,
+        setDefaultCurrency, refreshMembers, refreshCategories, nameFor
+      }}
     >
       {children}
     </SettingsContext.Provider>

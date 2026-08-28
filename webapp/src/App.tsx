@@ -16,6 +16,7 @@ import { ReportsMonthlyPage } from './pages/ReportsMonthlyPage'
 import { ReportsMonthDetailPage } from './pages/ReportsMonthDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SmsSetupPage } from './pages/SmsSetupPage'
+import { CategoriesSetupPage } from './pages/CategoriesSetupPage'
 import { GmailSetupPage } from './pages/GmailSetupPage'
 import { GmailScanLogPage } from './pages/GmailScanLogPage'
 import { useSwipeBack } from './hooks/useSwipeBack'
@@ -74,6 +75,7 @@ function AuthGate() {
               <Route path="/reports/monthly/:month" element={<ReportsMonthDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSetupPage />} />
+              <Route path="/settings/categories" element={<CategoriesSetupPage />} />
               <Route path="/settings/gmail" element={<GmailSetupPage />} />
               {/* Google redirects here after consent; same component reads ?code= */}
               <Route path="/settings/gmail/callback" element={<GmailSetupPage />} />

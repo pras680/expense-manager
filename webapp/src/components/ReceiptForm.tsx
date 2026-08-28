@@ -44,7 +44,15 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const isTransfer = values.category === LOCAL_TRANSFER_CATEGORY
-  const { householdId } = useSettings()
+  const { householdId, customCategories } = useSettings()
+  // Include the receipt's current category even if it's since been removed
+  // from Settings (or predates this list entirely) — otherwise editing an
+  // older receipt would silently swap its category to whatever the <select>
+  // falls back to the moment the form loads.
+  const categoryOptions = [...EXPENSE_CATEGORIES, ...customCategories]
+  if (values.category && !categoryOptions.includes(values.category)) {
+    categoryOptions.push(values.category)
+  }
 
   function set<K extends keyof ReceiptFormValues>(key: K, value: ReceiptFormValues[K]) {
     setValues((v) => ({ ...v, [key]: value }))
@@ -204,7 +212,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
           onChange={(e) => set('category', e.target.value)}
           className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
         >
-          {EXPENSE_CATEGORIES.map((c) => (
+          {categoryOptions.map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>

@@ -230,6 +230,18 @@ export function SettingsPage() {
           </Link>
         </SectionCard>
 
+        <SectionCard icon="🏷️" title="Categories">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            Add categories specific to your household, on top of the built-in ones.
+          </p>
+          <Link
+            to="/settings/categories"
+            className="mt-3 inline-block rounded-lg bg-neutral-100 px-4 py-2.5 text-sm font-medium text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100"
+          >
+            Manage categories →
+          </Link>
+        </SectionCard>
+
         <SectionCard icon="📧" title="Gmail import">
           {gmailLoading ? (
             <p className="text-xs text-neutral-500 dark:text-neutral-400">Loading…</p>

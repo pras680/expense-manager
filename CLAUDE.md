@@ -91,6 +91,9 @@ Core tables (all in `public`, all RLS-enabled):
   keyword: learned corrections (`corrected_merchant`/`corrected_category`/
   `corrected_currency`/`corrected_card_last4`/`corrected_card_bank`) plus a
   freeform `note`, `use_count`. See Receipt comments and learned corrections.
+- **`household_categories`** — household-scoped custom categories, additions
+  only (never the fixed built-ins). `(household_id, lower(name))` unique.
+  See Categories.
 
 ### Ownership
 
@@ -366,12 +369,40 @@ table (relative to SGD) computes an approximate cross-rate. Always rounds to
 ## Categories
 
 `EXPENSE_CATEGORIES` (`webapp/src/lib/categories.ts`, ported from the iOS
-`Invoice.swift`) is a fixed list, not user-extensible. Two categories —
-`'Local Transfer'` and `'Credit Card Bill Payment'` — are excluded from every
-spend total/average/chart via `isExpenseCategory()`, because they represent
-money moving between accounts, not money spent; they're still kept as
-receipts for record-keeping, and `'Local Transfer'` gets its own detail
-fields (`transfer_from_bank`/`transfer_to_bank`/`transfer_kind`).
+`Invoice.swift`) is the fixed base list — 17 entries, shared by every
+household, never edited by this feature. Two of them — `'Local Transfer'`
+and `'Credit Card Bill Payment'` — are excluded from every spend total/
+average/chart via `isExpenseCategory()`, because they represent money moving
+between accounts, not money spent; they're still kept as receipts for
+record-keeping, and `'Local Transfer'` gets its own detail fields
+(`transfer_from_bank`/`transfer_to_bank`/`transfer_kind`).
+
+Households can additionally **add their own categories** (Settings →
+Categories → `CategoriesSetupPage.tsx`), stored in `household_categories`
+(household-scoped, add/delete only — no rename, and the two special
+categories above are never rows in this table, so there's nothing to
+protect from being renamed or deleted). `receipts.category` has no DB check
+constraint — it's plain `text`, and Reports/`CategoryBadge` already derive
+categories from whatever's on each receipt rather than a fixed list — so a
+custom category works everywhere a built-in one does with zero extra
+plumbing on the read side.
+
+The one place custom categories need active support is classification:
+`parse-receipt`'s system prompt normally hardcodes the enum *and* a
+hand-written one-sentence rule per built-in category. `process-sms-inbox`
+and `scan-gmail` fetch the caller's household's custom categories
+(`fetchHouseholdCategories`, same best-effort shape as `fetchCorrectionHints`)
+and pass them as `household_categories` in the request; `parse-receipt`
+appends them to the legal-values enum plus one generic instruction to prefer
+them "when it fits more precisely," since no hand-written rule is possible
+for a name someone just typed. No field sent → prompt is byte-for-byte
+unchanged, so this can't regress any caller that doesn't send it (iOS, and
+`AddReceiptPage`'s own manual/photo parse calls, currently don't — a human
+reviews the form right there either way, same as for every built-in
+category, so only the two *unattended* paths were wired up). Classification
+accuracy into a custom category is expected to be weaker than into a
+built-in one for that reason; the existing correction-learning hints
+(`receipt_correction_rules`) reinforce it per-merchant once corrected once.
 
 ## Storage
 
