@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import type { Receipt } from '../types/receipt'
 import { CategoryBadge } from './CategoryBadge'
-import { reportingTotal, reportingCurrency, needsReview } from '../lib/receiptShape'
+import { reportingTotal, reportingCurrency, needsReview, hasMergedSources, receiptSourceLabels } from '../lib/receiptShape'
 import { useSettings } from '../hooks/useSettings'
 
 function formatMoney(amount: number, currency: string) {
@@ -31,6 +31,7 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
   const sourceLabel = receipt.source === 'sms' ? 'SMS'
     : receipt.source === 'gmail' ? 'Email'
     : receipt.source === 'photo' ? 'Photo' : null
+  const merged = hasMergedSources(receipt)
 
   return (
     <Link
@@ -49,11 +50,19 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
           <span>{formatDate(receipt.date)}</span>
           {receipt.cardLast4 && <span>•••• {receipt.cardLast4}</span>}
         </div>
-        {(receipt.category || showOwner || receipt.visibility === 'private' || sourceLabel || unreviewed) && (
+        {(receipt.category || showOwner || receipt.visibility === 'private' || sourceLabel || unreviewed || merged) && (
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {unreviewed && (
               <span className="inline-block rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white">
                 Check
+              </span>
+            )}
+            {merged && (
+              <span
+                title={`Combined data from ${receiptSourceLabels(receipt).join(' + ')}`}
+                className="inline-block rounded-full bg-teal-100 px-2 py-0.5 text-[11px] font-medium text-teal-800 dark:bg-teal-900/50 dark:text-teal-300"
+              >
+                🔗 Merged
               </span>
             )}
             {receipt.category && <CategoryBadge category={receipt.category} />}

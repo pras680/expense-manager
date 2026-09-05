@@ -6,7 +6,7 @@ import { PageHeader } from '../components/PageHeader'
 import { useReceipts } from '../hooks/useReceipts'
 import { useSettings } from '../hooks/useSettings'
 import { updateReceipt, deleteReceipt, type ReceiptWriteInput } from '../lib/supabaseClient'
-import { displayReceiptAmount, displayReceiptCurrency } from '../lib/receiptShape'
+import { displayReceiptAmount, displayReceiptCurrency, hasMergedSources, receiptSourceLabels } from '../lib/receiptShape'
 import { DEFAULT_CURRENCY } from '../lib/categories'
 
 export function EditReceiptPage() {
@@ -77,6 +77,12 @@ export function EditReceiptPage() {
           </button>
         }
       />
+      {hasMergedSources(receipt) && (
+        <div className="mt-3 rounded-xl border border-teal-300 bg-teal-50 p-3 text-sm text-teal-900 dark:border-teal-700/60 dark:bg-teal-950/30 dark:text-teal-200">
+          🔗 Merged — this receipt combines data from {receiptSourceLabels(receipt).join(' + ')}. A later import of
+          the same charge was folded in here instead of creating a duplicate.
+        </div>
+      )}
       <div className="mt-4">
         <ReceiptForm
           initial={initial}

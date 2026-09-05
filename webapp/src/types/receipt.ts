@@ -33,6 +33,13 @@ export interface Receipt {
   reviewedAt: string | null
   /** Auto-filled from the parser's derivation_note, freely editable afterward. */
   comment: string | null
+  /**
+   * One entry per source folded into this receipt by the duplicate-merge
+   * guard (process-sms-inbox/scan-gmail/insertOrMergeReceipt) — see
+   * raw_ocr_json.merged_from and "Duplicate detection and merging" in
+   * CLAUDE.md. Empty for a receipt that only ever had one source.
+   */
+  mergedFrom: { source: string; ref: string | null; mergedAt: string | null }[]
 }
 
 export interface ParsedReceipt {

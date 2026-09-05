@@ -5,7 +5,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { ReceiptCard } from '../components/ReceiptCard'
 import { StatTile } from '../components/StatTile'
-import { receiptMatches, reportingTotal, needsReview, isExpenseReceipt } from '../lib/receiptShape'
+import { receiptMatches, reportingTotal, needsReview, isExpenseReceipt, hasMergedSources } from '../lib/receiptShape'
 import { markReceiptsReviewed } from '../lib/supabaseClient'
 import { MonthOverview } from '../components/MonthOverview'
 import { computeSpendingInsight } from '../lib/spendingInsights'
@@ -33,6 +33,11 @@ export function ReceiptsListPage() {
   const [clearing, setClearing] = useState(false)
 
   const unreviewed = useMemo(() => receipts.filter(needsReview), [receipts])
+  // Receipts the duplicate guard folded a second source into (e.g. an email
+  // scan enriching an SMS-created receipt) instead of creating a duplicate —
+  // surfaced here so merge activity is visible even when the merge landed on
+  // an already-reviewed receipt and never shows up in the banner above.
+  const merged = useMemo(() => receipts.filter(hasMergedSources), [receipts])
 
   async function markAllReviewed() {
     if (!session?.userId || unreviewed.length === 0) return
@@ -115,6 +120,17 @@ export function ReceiptsListPage() {
               {clearing ? 'Marking…' : 'Mark all checked'}
             </button>
           </div>
+        </div>
+      )}
+
+      {merged.length > 0 && (
+        <div className="mt-3 rounded-xl border border-teal-300 bg-teal-50 p-3 dark:border-teal-700/60 dark:bg-teal-950/30">
+          <p className="text-sm font-medium text-teal-900 dark:text-teal-200">
+            🔗 {merged.length} receipt{merged.length === 1 ? '' : 's'} merged from multiple sources
+          </p>
+          <p className="mt-0.5 text-xs text-teal-800 dark:text-teal-300/80">
+            A later SMS, email, or photo for the same charge was combined into the original receipt instead of creating a duplicate. Look for the "Merged" tag below.
+          </p>
         </div>
       )}
 

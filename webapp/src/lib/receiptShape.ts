@@ -68,6 +68,16 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
       })
     : []
 
+  const mergedFrom = Array.isArray(rawJson.merged_from)
+    ? (rawJson.merged_from as unknown[]).flatMap((entry) => {
+        if (!entry || typeof entry !== 'object') return []
+        const row = entry as Record<string, unknown>
+        const source = stringValue(row.source)
+        if (!source) return []
+        return [{ source, ref: stringValue(row.ref), mergedAt: stringValue(row.merged_at) }]
+      })
+    : []
+
   return {
     id: row.id,
     merchant: stringValue(row.merchant),
@@ -97,7 +107,8 @@ export function receiptFromRow(row: Record<string, unknown>): Receipt | null {
     source: (['manual', 'photo', 'sms', 'gmail'] as const)
       .find((s) => s === stringValue(row.source)) ?? 'manual',
     reviewedAt: stringValue(row.reviewed_at),
-    comment: stringValue(row.comment)
+    comment: stringValue(row.comment),
+    mergedFrom
   }
 }
 
@@ -148,4 +159,18 @@ export function receiptMatches(r: Receipt, query: string): boolean {
 /** Auto-imported and not yet verified by anyone in the household. */
 export function needsReview(r: Receipt): boolean {
   return r.reviewedAt === null && (r.source === 'sms' || r.source === 'gmail')
+}
+
+/** True once a richer source has been folded into this receipt — see CLAUDE.md's "Duplicate detection and merging". */
+export function hasMergedSources(r: Receipt): boolean {
+  return r.mergedFrom.length > 0
+}
+
+const SOURCE_LABELS: Record<string, string> = { sms: 'SMS', gmail: 'Email', photo: 'Photo', manual: 'Manual' }
+
+/** Human-readable, de-duplicated list of every source that contributed to this receipt (its own `source` plus every merged-in one). */
+export function receiptSourceLabels(r: Receipt): string[] {
+  const sources = [r.source, ...r.mergedFrom.map((m) => m.source)]
+  const labels = sources.map((s) => SOURCE_LABELS[s] ?? s)
+  return Array.from(new Set(labels))
 }
