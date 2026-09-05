@@ -7,6 +7,10 @@ interface ReceiptsContextValue {
   loading: boolean
   error: string | null
   refresh: () => Promise<void>
+  /** Optimistic, local-only removal — the caller has already deleted server-side. Avoids a full reloading-spinner refetch for a single swipe action. */
+  removeReceiptLocal: (id: string) => void
+  /** Optimistic, local-only patch — the caller has already written the change server-side. */
+  patchReceiptLocal: (id: string, patch: Partial<Receipt>) => void
 }
 
 const ReceiptsContext = createContext<ReceiptsContextValue | null>(null)
@@ -41,8 +45,16 @@ export function ReceiptsProvider({ children }: { children: ReactNode }) {
     refresh()
   }, [refresh])
 
+  const removeReceiptLocal = useCallback((id: string) => {
+    setReceipts((prev) => prev.filter((r) => r.id !== id))
+  }, [])
+
+  const patchReceiptLocal = useCallback((id: string, patch: Partial<Receipt>) => {
+    setReceipts((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+  }, [])
+
   return (
-    <ReceiptsContext.Provider value={{ receipts, loading, error, refresh }}>
+    <ReceiptsContext.Provider value={{ receipts, loading, error, refresh, removeReceiptLocal, patchReceiptLocal }}>
       {children}
     </ReceiptsContext.Provider>
   )
