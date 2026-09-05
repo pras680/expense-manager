@@ -5,7 +5,7 @@ import { useReceipts } from '../hooks/useReceipts'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import {
-  insertReceipt,
+  insertOrMergeReceipt,
   parseReceiptText,
   parseReceiptImage,
   uploadReceiptImage,
@@ -152,7 +152,10 @@ export function AddReceiptPage() {
   }
 
   async function handleSubmit(input: ReceiptWriteInput) {
-    await insertReceipt(input)
+    // Silently folds into an existing sms/gmail-sourced receipt for the same
+    // charge when one exists, rather than creating a second record — see
+    // insertOrMergeReceipt.
+    await insertOrMergeReceipt(input)
     await refresh()
     navigate('/')
   }

@@ -217,6 +217,151 @@ export async function updateReceipt(id: string, input: ReceiptWriteInput): Promi
   }
 }
 
+// Richer sources should never be silently dropped as duplicates of a thinner
+// one, and shouldn't be silently downgraded by one either — 'manual' and
+// 'photo' rank the same since both are typed/confirmed by a person right in
+// the form, regardless of whether a photo happens to be attached.
+const SOURCE_RICHNESS: Record<ReceiptSource, number> = { sms: 0, gmail: 1, manual: 2, photo: 2 }
+
+interface DuplicateCandidateRow {
+  id: string
+  merchant: string | null
+  date: string | null
+  card_bank: string | null
+  card_last4: string | null
+  source: string | null
+  reviewed_at: string | null
+  comment: string | null
+  file_url: string | null
+  raw_ocr_json: unknown
+}
+
+// Mirrors the household/user-scoped, total+date+(merchant-or-card) duplicate
+// guard in process-sms-inbox/scan-gmail. Those two run as service_role and
+// filter by household by hand; here RLS already scopes the select to the
+// caller's own + household rows, so no explicit filter is needed.
+async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<DuplicateCandidateRow | null> {
+  const incomingRichness = SOURCE_RICHNESS[input.source ?? 'manual'] ?? 2
+  const d = new Date(input.date)
+  if (Number.isNaN(d.getTime())) return null
+  const normalizedDate = d.toISOString()
+  const from = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString()
+  const to = new Date(d.getTime() + 24 * 60 * 60 * 1000).toISOString()
+
+  const resp = await authorizedFetch(
+    `${REST_URL}/receipts?select=id,merchant,date,card_bank,card_last4,source,reviewed_at,comment,file_url,raw_ocr_json` +
+    `&total=gte.${(input.total - 0.01).toFixed(2)}&total=lte.${(input.total + 0.01).toFixed(2)}` +
+    `&date=gte.${from}&date=lte.${to}&limit=10`
+  )
+  if (!resp.ok) return null
+  const rows = await resp.json()
+  if (!Array.isArray(rows)) return null
+
+  const needle = input.merchant.trim().toLowerCase()
+  const cardKey = input.cardBank && input.cardLast4 ? `${input.cardBank.toLowerCase()}|${input.cardLast4}` : null
+  const match = (rows as DuplicateCandidateRow[]).find((r) => {
+    // Only worth merging into a strictly less-rich existing source — an
+    // equal-or-richer one is either a genuinely separate purchase or already
+    // the best copy of this data, so it's left alone (a plain duplicate, same
+    // as before this existed).
+    const existingRichness = SOURCE_RICHNESS[(r.source as ReceiptSource) ?? 'manual'] ?? 2
+    if (existingRichness >= incomingRichness) return false
+    const other = (r.merchant ?? '').toLowerCase()
+    if (other === needle || (other !== '' && needle !== '' && (other.includes(needle) || needle.includes(other)))) return true
+    // Same reasoning as the edge functions' guard: merchant text disagrees
+    // across sources more often than expected, but the same card charged on
+    // the same calendar date is an independently strong signal on its own.
+    if (cardKey && r.card_bank && r.card_last4 && r.date === normalizedDate) {
+      return `${r.card_bank.toLowerCase()}|${r.card_last4}` === cardKey
+    }
+    return false
+  })
+  return match ?? null
+}
+
+function mergeRawOcrJson(existingRaw: Record<string, unknown>, input: ReceiptWriteInput): Record<string, unknown> {
+  const mergedFrom = Array.isArray(existingRaw.merged_from) ? existingRaw.merged_from as unknown[] : []
+  return {
+    ...existingRaw,
+    merged_from: [
+      ...mergedFrom,
+      { source: input.source ?? 'manual', merged_at: new Date().toISOString() }
+    ]
+  }
+}
+
+// Folds a richer manual/photo entry into an existing sms/gmail-sourced
+// duplicate instead of creating a second record for the same charge — the
+// one gap insertReceipt alone doesn't cover (manual/photo skip the duplicate
+// guard entirely otherwise). Two write modes, same split as scan-gmail's:
+//
+// - Not yet reviewed: this save IS the review, so the form's fields replace
+//   the thinner ones outright (merchant, category, card info, source).
+// - Already reviewed by a human: their confirmed fields are left untouched;
+//   only raw, non-interpretive content (raw text/line items, a receipt image
+//   if one wasn't already attached, an appended comment) is folded in.
+async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptWriteInput): Promise<void> {
+  const existingRaw = (existing.raw_ocr_json && typeof existing.raw_ocr_json === 'object'
+    ? existing.raw_ocr_json as Record<string, unknown>
+    : {}) as Record<string, unknown>
+  const mergedRaw = mergeRawOcrJson(existingRaw, input)
+  const commentLabel = input.source === 'photo' ? 'photo' : 'manual entry'
+  const mergedComment = input.comment && !(existing.comment ?? '').includes(input.comment)
+    ? (existing.comment ? `${existing.comment}\n\n[Also seen via ${commentLabel}] ${input.comment}` : input.comment)
+    : existing.comment
+
+  if (existing.reviewed_at) {
+    const body: Record<string, unknown> = { raw_ocr_json: mergedRaw, comment: mergedComment }
+    if (!existing.file_url && input.fileUrl) body.file_url = input.fileUrl
+    const resp = await authorizedFetch(`${REST_URL}/receipts?id=eq.${existing.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      body: JSON.stringify(body)
+    })
+    await throwIfNotOk(resp, 'Merge receipt failed')
+    return
+  }
+
+  const patch = (withOptional: boolean) =>
+    authorizedFetch(`${REST_URL}/receipts?id=eq.${existing.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify({ ...buildReceiptBody(input, withOptional), raw_ocr_json: mergedRaw, comment: mergedComment })
+    })
+  let resp = await patch(true)
+  if (!resp.ok) {
+    const errBody = await resp.text()
+    if (isMissingColumnError(errBody)) {
+      resp = await patch(false)
+    } else {
+      throw new Error(`Merge receipt failed: HTTP ${resp.status} ${errBody.slice(0, 300)}`)
+    }
+  }
+  await throwIfNotOk(resp, 'Merge receipt failed')
+}
+
+/**
+ * Like insertReceipt, but first checks for an existing sms/gmail-sourced
+ * duplicate of the same charge and merges into it instead of creating a
+ * second record — see mergeIntoReceipt. A failed duplicate check must never
+ * block a legitimate save, same fail-open convention as the two server-side
+ * pipelines' own guards.
+ */
+export async function insertOrMergeReceipt(input: ReceiptWriteInput): Promise<{ id: string; merged: boolean }> {
+  let duplicate: DuplicateCandidateRow | null = null
+  try {
+    duplicate = await findDuplicateForMerge(input)
+  } catch {
+    duplicate = null
+  }
+  if (duplicate) {
+    await mergeIntoReceipt(duplicate, input)
+    return { id: duplicate.id, merged: true }
+  }
+  const id = await insertReceipt(input)
+  return { id, merged: false }
+}
+
 export async function deleteReceipt(id: string): Promise<void> {
   const resp = await authorizedFetch(`${REST_URL}/receipts?id=eq.${id}`, {
     method: 'DELETE',

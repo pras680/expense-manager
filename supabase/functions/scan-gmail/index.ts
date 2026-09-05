@@ -299,7 +299,7 @@ async function scanForUser(
   conn: { user_id: string; email: string; last_scan_at: string | null },
   headers: RestHeaders
 ): Promise<Record<string, unknown>> {
-  const out: Record<string, unknown> = { user: conn.email, imported: 0, skipped: 0, failed: 0 }
+  const out: Record<string, unknown> = { user: conn.email, imported: 0, merged: 0, skipped: 0, failed: 0 }
 
   const accessToken = await accessTokenFor(conn.user_id, headers)
   if (!accessToken) {
@@ -350,6 +350,7 @@ async function scanForUser(
   for (const id of ids) {
     const outcome = await processMessage(id, accessToken, owner, headers)
     if (outcome === 'imported') (out.imported as number)++
+    else if (outcome === 'merged') (out.merged as number)++
     else if (outcome === 'failed') (out.failed as number)++
     else (out.skipped as number)++
   }
@@ -403,6 +404,19 @@ async function accessTokenFor(userId: string, headers: RestHeaders): Promise<str
 }
 
 type OwnerContext = { userId: string; householdId: string | null; defaultCurrency: string }
+
+interface DupCandidateRow {
+  id: string
+  merchant?: string | null
+  date?: string | null
+  card_bank?: string | null
+  card_last4?: string | null
+  source?: string | null
+  reviewed_at?: string | null
+  comment?: string | null
+  file_url?: string | null
+  raw_ocr_json?: unknown
+}
 
 // Household-scoped corrections learned from past edits (see
 // receipt_correction_rules / match_correction_rules in
@@ -475,7 +489,7 @@ async function processMessage(
   accessToken: string,
   owner: OwnerContext,
   headers: RestHeaders
-): Promise<'imported' | 'skipped' | 'failed'> {
+): Promise<'imported' | 'merged' | 'skipped' | 'failed'> {
   // Already imported? gmail_message_id is unique per user, so this is the
   // authoritative guard against re-importing on the overlapping window. Not
   // logged: this fires every run for the same handful of messages in the
@@ -640,7 +654,7 @@ async function processMessage(
     const from = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString()
     const to = new Date(d.getTime() + 24 * 60 * 60 * 1000).toISOString()
     const dupResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/receipts?select=id,merchant,date,card_bank,card_last4&${scope}` +
+      `${SUPABASE_URL}/rest/v1/receipts?select=id,merchant,date,card_bank,card_last4,source,reviewed_at,comment,file_url,raw_ocr_json&${scope}` +
       `&total=gte.${(converted - 0.01).toFixed(2)}&total=lte.${(converted + 0.01).toFixed(2)}` +
       `&date=gte.${from}&date=lte.${to}&limit=10`,
       { headers }
@@ -649,7 +663,7 @@ async function processMessage(
       const dupRows = await dupResp.json()
       const needle = merchant.toLowerCase()
       const cardKey = cardBank && cardLast4 ? `${cardBank.toLowerCase()}|${cardLast4}` : null
-      const matchRow = Array.isArray(dupRows) && dupRows.find((r: { merchant?: string | null; date?: string | null; card_bank?: string | null; card_last4?: string | null }) => {
+      const matchRow = Array.isArray(dupRows) && dupRows.find((r: DupCandidateRow) => {
         const other = (r.merchant ?? '').toLowerCase()
         if (other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))) return true
         // Merchant text disagrees between sources more often than it should — e.g. an
@@ -663,6 +677,26 @@ async function processMessage(
         return false
       })
       if (matchRow) {
+        // An SMS alert is the least informative of the three sources — terse,
+        // no line items, often names the bank instead of the merchant. Rather
+        // than discard a richer email parse of the same charge, fold it into
+        // the SMS-created row instead of leaving two records (or losing the
+        // better data). An existing gmail/photo/manual row is never downgraded
+        // this way — this import doesn't out-rank those, so it's left a plain
+        // skip, same as before.
+        if (matchRow.source === 'sms') {
+          const merged = await mergeIntoExistingReceipt(matchRow, messageId, {
+            merchant, date: normalizedDate, total: converted, category,
+            cardBank, cardLast4, comment: derivationNote, rawText,
+            receiptCurrency, defaultCurrency: owner.defaultCurrency,
+            conversionRate: rate, convertedTotal: converted,
+            totalRaw, source: 'gmail', headers
+          })
+          // Not logged, same as a plain successful import: gmail_scan_log is
+          // deliberately a "what went wrong" list, and a merge is a success —
+          // it enriched an existing receipt, nothing here needs explaining.
+          if (merged) return 'merged'
+        }
         await logScan(owner.userId, messageId, subject, sender, receivedISO,
           `Matched an existing receipt from "${matchRow.merchant ?? 'another source'}" — treated as a duplicate.`, headers)
         return 'skipped'
@@ -718,6 +752,110 @@ async function processMessage(
     return 'failed'
   }
   return 'imported'
+}
+
+// Folds a richer Gmail parse into an existing SMS-sourced receipt instead of
+// leaving two records for the same charge. Two different write modes depending
+// on whether a human has already reviewed the SMS-created row:
+//
+// - Not yet reviewed (reviewed_at is null): the email's structured fields win
+//   outright — merchant, category, card info, source flips to 'gmail' — same
+//   as if the email had been imported first. reviewed_at is left null; this
+//   is still an unattended import, nobody has confirmed it.
+// - Already reviewed: a human already confirmed this receipt's merchant/
+//   category/etc, so those are left untouched. Only raw, non-interpretive
+//   content is attached (the email's own text/line items, and a receipt
+//   image/file if the SMS-created row didn't already have one).
+//
+// Idempotent by design: the scanner re-lists messages inside its lookback
+// window on every run (see the "already imported" comment above), so the
+// same email can be handed to this function more than once. raw_ocr_json's
+// merged_from list is checked first and is what makes a repeat call a no-op
+// rather than double-appending the same comment/line items.
+async function mergeIntoExistingReceipt(
+  existing: DupCandidateRow,
+  messageId: string,
+  candidate: {
+    merchant: string
+    date: string
+    total: number
+    category: string
+    cardBank: string | null
+    cardLast4: string | null
+    comment: string | null
+    rawText: string
+    receiptCurrency: string
+    defaultCurrency: string
+    conversionRate: number
+    convertedTotal: number
+    totalRaw: number
+    source: 'gmail'
+    headers: RestHeaders
+  }
+): Promise<boolean> {
+  const existingRaw = (existing.raw_ocr_json && typeof existing.raw_ocr_json === 'object'
+    ? existing.raw_ocr_json as Record<string, unknown>
+    : {}) as Record<string, unknown>
+  const mergedFrom = Array.isArray(existingRaw.merged_from) ? existingRaw.merged_from as unknown[] : []
+  const alreadyMerged = mergedFrom.some((m) =>
+    m && typeof m === 'object' && (m as Record<string, unknown>).source === candidate.source &&
+    (m as Record<string, unknown>).ref === messageId
+  )
+  if (alreadyMerged) return true
+
+  const rawOcrJson = {
+    ...existingRaw,
+    merged_from: [...mergedFrom, { source: candidate.source, ref: messageId, merged_at: new Date().toISOString() }]
+  }
+
+  const commentLabel = 'email'
+  const mergedComment = candidate.comment && !(existing.comment ?? '').includes(candidate.comment)
+    ? (existing.comment ? `${existing.comment}\n\n[Also seen via ${commentLabel}] ${candidate.comment}` : candidate.comment)
+    : existing.comment
+
+  const body: Record<string, unknown> = existing.reviewed_at
+    ? {
+        // Reviewed — only raw content and provenance may change.
+        raw_ocr_json: rawOcrJson,
+        comment: mergedComment,
+        // The message id is provenance, not a reviewed field: it's what makes
+        // this merge idempotent on the next scan, regardless of whether this
+        // receipt belongs to the caller or a household-mate.
+        gmail_message_id: messageId
+      }
+    : {
+        // Not yet reviewed — the email's own read of the charge wins.
+        merchant: candidate.merchant,
+        date: candidate.date,
+        total: candidate.total,
+        currency: candidate.defaultCurrency,
+        category: candidate.category,
+        card_bank: candidate.cardBank,
+        card_last4: candidate.cardLast4,
+        source: candidate.source,
+        gmail_message_id: messageId,
+        comment: mergedComment,
+        raw_ocr_json: {
+          ...rawOcrJson,
+          raw_text: candidate.rawText,
+          extracted_digits: candidate.cardLast4 ?? '',
+          receipt_amount: String(candidate.totalRaw),
+          card_last4: candidate.cardLast4 ?? '',
+          card_bank: candidate.cardBank ?? '',
+          category: candidate.category,
+          default_currency: candidate.defaultCurrency,
+          receipt_currency: candidate.receiptCurrency,
+          conversion_rate: String(candidate.conversionRate),
+          converted_total: String(candidate.convertedTotal)
+        }
+      }
+
+  const resp = await fetch(`${SUPABASE_URL}/rest/v1/receipts?id=eq.${existing.id}`, {
+    method: 'PATCH',
+    headers: { ...candidate.headers, Prefer: 'return=minimal' },
+    body: JSON.stringify(body)
+  })
+  return resp.ok
 }
 
 // Diagnostic trail for "why didn't this email become a receipt" — see

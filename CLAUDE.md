@@ -155,8 +155,13 @@ All three converge on the same `receipts` table and the same shape.
 - The image is compressed client-side, uploaded to Storage, and sent to
   `parse-receipt` as base64 for vision parsing — in parallel with the
   upload.
-- **No duplicate check runs on this path.** It's the one true gap — SMS and
-  Gmail both guard against duplicates, manual entry doesn't.
+- `insertOrMergeReceipt` (`supabaseClient.ts`, called from `AddReceiptPage`'s
+  `handleSubmit` instead of `insertReceipt` directly) runs the same
+  household/user-scoped, total±$0.01/date±24h/merchant-or-card duplicate
+  check as the two unattended pipelines below, then — this is the one thing
+  that makes this path different — **merges into the match instead of either
+  inserting a second row or discarding the richer data**. See Duplicate
+  detection and merging for the full rule.
 
 ### 2. SMS (iOS Shortcut → `receive-sms` → `sms_inbox` → `process-sms-inbox` cron)
 
@@ -322,20 +327,26 @@ currently sync with each other.
 
 Scope, matching the duplicate-check precedent: household-scoped (`current_household_ids()`), never cross-household — a rule one member learns benefits every member's future imports.
 
-## Duplicate detection
+## Duplicate detection and merging
 
-Runs independently in `process-sms-inbox` and `scan-gmail` (structurally
-identical logic, not shared code — no `_shared/` directory exists for Edge
-Functions in this repo). **Does not run at all on the manual/photo path.**
+Runs in all three ingestion paths now — `process-sms-inbox`, `scan-gmail`,
+and `AddReceiptPage` (via `insertOrMergeReceipt` in `supabaseClient.ts`) —
+structurally identical logic in each, not shared code (no `_shared/`
+directory exists for Edge Functions in this repo, and the webapp is a
+different runtime entirely). The webapp's copy is a client-side port of the
+same rule, relying on RLS instead of an explicit `household_id`/`user_id`
+filter to get the same scoping (see below).
 
 Scope is always **per-household** (falling back to per-user only if the
 owner has no household) — **never across households.** A receipt forwarded
 to two household members is legitimately two records; two different
 households' coincidentally-identical purchases must never suppress each
-other. This is enforced by filtering on `household_id`/`user_id` before any
-content comparison, not by RLS (the check runs with the service-role key,
-which bypasses RLS entirely — the household scoping is a deliberate choice
-in the query, not a security boundary).
+other. In the edge functions this is enforced by filtering on
+`household_id`/`user_id` before any content comparison, not by RLS (the
+check runs with the service-role key, which bypasses RLS entirely — the
+household scoping is a deliberate choice in the query, not a security
+boundary). In the webapp, RLS itself provides the scoping (the query runs as
+the signed-in user, which only ever sees own + household rows).
 
 A candidate is flagged a duplicate if, within the same scope:
 
@@ -354,6 +365,63 @@ A candidate is flagged a duplicate if, within the same scope:
 
 Currency is not separately compared — `total` here is always the *converted*
 total in the owner's `default_currency`.
+
+### Merging instead of dropping the richer side
+
+A duplicate match used to always mean "discard the incoming candidate." Now
+each source has a richness rank — `sms` (0) < `gmail` (1) < `manual`/`photo`
+(2, tied: both are typed or confirmed by a person right in the form,
+image or not) — and a match only gets discarded outright when the *existing*
+row is already equal-or-richer than the incoming candidate. When the
+existing row is strictly less rich, the incoming candidate is **merged into
+it** instead of creating a second record:
+
+- **`process-sms-inbox`**: never merges anything — `sms` is rank 0, the
+  floor, so an incoming SMS can never be strictly richer than whatever it
+  matched. Its duplicate guard is unchanged: a match is always a plain skip.
+- **`scan-gmail`**: merges into an existing `sms`-sourced match
+  (`mergeIntoExistingReceipt`). A match against an existing `gmail` or
+  `manual`/`photo` row is still a plain skip — gmail doesn't outrank either.
+- **`AddReceiptPage` → `insertOrMergeReceipt`**: merges into an existing
+  `sms`- or `gmail`-sourced match (`mergeIntoReceipt`). This is also what
+  closes the old "no duplicate check on this path" gap — manual/photo entry
+  now runs the same guard, it just resolves a hit by merging rather than
+  either silently duplicating (the old behavior) or silently dropping.
+
+Merging itself branches on whether the *existing* row has been reviewed
+(`reviewed_at`):
+
+- **Not yet reviewed** (`reviewed_at is null`): the incoming candidate's
+  structured fields win outright — merchant, category, currency, card info,
+  total/date, and `source` all get overwritten with the richer source's
+  values, exactly as if that source had been the first to import it. This is
+  safe because nobody has confirmed the old, thinner values yet.
+- **Already reviewed**: the existing row's structured fields are left
+  completely untouched — a human already confirmed them, and a later,
+  richer source doesn't get to silently overturn that. Only non-interpretive
+  *raw content* is folded in: the incoming source's raw text/line items
+  (appended into `raw_ocr_json.merged_from`, never overwriting the original),
+  a `file_url`/receipt image if the existing row didn't already have one,
+  and the incoming `comment`/derivation note appended (not replacing) the
+  existing comment.
+
+In both branches, `raw_ocr_json.merged_from` accumulates one entry per merge
+(`{ source, ref, merged_at }`, `ref` being the Gmail message id where
+applicable) — this is also the idempotency guard: `scan-gmail` re-lists
+messages inside its overlapping lookback window on every run, so the same
+email can be handed to the merge path more than once, and a `merged_from`
+entry already carrying that message id makes a repeat call a no-op rather
+than double-appending the same comment/raw text.
+
+A merge is treated as a success, not a finding — `scan-gmail` does not write
+a `gmail_scan_log` row for it (that log is deliberately a "what went wrong"
+list; a merge is the opposite), and the webapp does it silently with no
+confirmation prompt, same as a normal save.
+
+A failed duplicate check (a network error, an unexpected response shape)
+must never block a legitimate save in any of the three paths — same
+fail-open convention as everywhere else in this file: a missed duplicate is
+recoverable, a dropped or wrongly-blocked real receipt is not.
 
 ## Currency conversion
 
