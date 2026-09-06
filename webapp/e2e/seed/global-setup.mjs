@@ -7,12 +7,21 @@
 // and globalSetup throwing would turn that into a hard failure instead.
 import './load-env.mjs'
 import { seedSampleReceipts } from './seed.mjs'
+import { stopTlsRelay } from '../proxy/tls-relay.mjs'
 
 export default async function globalSetup() {
   if (!process.env.TEST_USER_EMAIL || !process.env.TEST_USER_PASSWORD) {
     console.log('[e2e seed] TEST_USER_EMAIL/TEST_USER_PASSWORD not set — skipping seed, specs will self-skip.')
-    return
+    return teardown
   }
   const { cleared, inserted, email } = await seedSampleReceipts({ reset: true })
   console.log(`[e2e seed] cleared ${cleared}, seeded ${inserted} sample receipt(s) for ${email}.`)
+  return teardown
+}
+
+// playwright.config.ts may have started e2e/proxy/tls-relay.mjs's relay at
+// config-load time (same module registry/process as globalSetup, so it's
+// the same singleton) — stopTlsRelay() is a no-op if it wasn't.
+async function teardown() {
+  await stopTlsRelay()
 }
