@@ -116,7 +116,7 @@ export function RegisterPage({ onBackToSignIn }: { onBackToSignIn: () => void })
           <button
             type="submit"
             disabled={busy}
-            className="mt-2 rounded-lg bg-teal-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+            className="mt-2 rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
           >
             {busy ? 'Creating account…' : 'Create account'}
           </button>
@@ -125,7 +125,7 @@ export function RegisterPage({ onBackToSignIn }: { onBackToSignIn: () => void })
         <button
           type="button"
           onClick={onBackToSignIn}
-          className="mt-4 w-full text-center text-sm text-teal-700 dark:text-teal-400"
+          className="mt-4 w-full text-center text-sm text-accent-700 dark:text-accent-400"
         >
           Already have an account? Sign in
         </button>

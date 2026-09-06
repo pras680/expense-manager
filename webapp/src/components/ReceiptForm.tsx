@@ -259,7 +259,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
                   aria-pressed={values.transferKind === kind}
                   className={`flex-1 rounded-lg py-2.5 text-sm font-medium capitalize ${
                     values.transferKind === kind
-                      ? 'bg-teal-700 text-white'
+                      ? 'bg-accent-700 text-white'
                       : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
                   }`}
                 >
@@ -344,7 +344,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
             aria-pressed={values.visibility === 'household'}
             className={`flex-1 rounded-lg py-2.5 text-sm font-medium ${
               values.visibility === 'household'
-                ? 'bg-teal-700 text-white'
+                ? 'bg-accent-700 text-white'
                 : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
             }`}
           >
@@ -373,7 +373,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
       <button
         type="submit"
         disabled={saving}
-        className="mt-2 rounded-lg bg-teal-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+        className="mt-2 rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
       >
         {saving ? 'Saving…' : submitLabel}
       </button>

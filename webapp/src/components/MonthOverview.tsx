@@ -11,16 +11,16 @@ const PACE_STYLE: Record<SpendingPace, { fill: string; track: string; dot: strin
     text: 'text-neutral-600 dark:text-neutral-300'
   },
   under: {
-    fill: 'bg-teal-600',
-    track: 'bg-teal-100 dark:bg-teal-950',
-    dot: 'bg-teal-600',
-    text: 'text-teal-800 dark:text-teal-300'
+    fill: 'bg-accent-600',
+    track: 'bg-accent-100 dark:bg-accent-950',
+    dot: 'bg-accent-600',
+    text: 'text-accent-800 dark:text-accent-300'
   },
   'on-track': {
-    fill: 'bg-teal-600',
-    track: 'bg-teal-100 dark:bg-teal-950',
-    dot: 'bg-teal-600',
-    text: 'text-teal-800 dark:text-teal-300'
+    fill: 'bg-accent-600',
+    track: 'bg-accent-100 dark:bg-accent-950',
+    dot: 'bg-accent-600',
+    text: 'text-accent-800 dark:text-accent-300'
   },
   over: {
     fill: 'bg-amber-500',

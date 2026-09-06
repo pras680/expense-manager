@@ -98,8 +98,8 @@ export function SmsSetupPage() {
 
       {/* Shown exactly once — the server only ever stores a hash of this. */}
       {newToken && (
-        <div className="mt-4 rounded-xl border border-teal-300 bg-teal-50 p-4 dark:border-teal-800 dark:bg-teal-950/40">
-          <p className="text-sm font-semibold text-teal-900 dark:text-teal-200">
+        <div className="mt-4 rounded-xl border border-accent-300 bg-accent-50 p-4 dark:border-accent-800 dark:bg-accent-950/40">
+          <p className="text-sm font-semibold text-accent-900 dark:text-accent-200">
             Copy this now — it can't be shown again
           </p>
           <code className="mt-2 block break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100">
@@ -108,7 +108,7 @@ export function SmsSetupPage() {
           <div className="mt-2 flex gap-2">
             <button
               onClick={copyToken}
-              className="rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
+              className="rounded-lg bg-accent-700 px-3 py-1.5 text-sm font-medium text-white"
             >
               {copied ? 'Copied' : 'Copy'}
             </button>
@@ -120,7 +120,7 @@ export function SmsSetupPage() {
             </button>
           </div>
 
-          <div className="mt-4 border-t border-teal-200 pt-3 text-xs text-teal-900 dark:border-teal-800 dark:text-teal-200">
+          <div className="mt-4 border-t border-accent-200 pt-3 text-xs text-accent-900 dark:border-accent-800 dark:text-accent-200">
             {/* Manual setup leads: recent iOS builds have started rejecting an
                 unsigned .shortcut file outright ("Unsigned Shortcuts is Not
                 Supported"), with no "Allow Untrusted Shortcuts" toggle offered
@@ -149,7 +149,7 @@ export function SmsSetupPage() {
             </ol>
 
             <details className="mt-3">
-              <summary className="cursor-pointer text-[11px] font-medium text-teal-800/80 dark:text-teal-300/80">
+              <summary className="cursor-pointer text-[11px] font-medium text-accent-800/80 dark:text-accent-300/80">
                 Prefer not to build it by hand? Try the downloadable version (works on some
                 devices, not others)
               </summary>
@@ -159,7 +159,7 @@ export function SmsSetupPage() {
               >
                 Download Shortcut
               </button>
-              <p className="mt-2 text-[11px] text-teal-800/80 dark:text-teal-300/80">
+              <p className="mt-2 text-[11px] text-accent-800/80 dark:text-accent-300/80">
                 Open the downloaded file → <strong>Add Shortcut</strong>. If iOS blocks it, check
                 Settings → Shortcuts for "Allow Untrusted Shortcuts" (only appears for a few
                 minutes right after a blocked attempt). If it says "Unsigned Shortcuts is Not
@@ -182,7 +182,7 @@ export function SmsSetupPage() {
         <button
           onClick={handleCreate}
           disabled={busy}
-          className="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          className="rounded-lg bg-accent-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
         >
           {busy ? '…' : 'Generate'}
         </button>

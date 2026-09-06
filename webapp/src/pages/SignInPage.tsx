@@ -74,7 +74,7 @@ export function SignInPage({ onRegister }: { onRegister: () => void }) {
           <button
             type="submit"
             disabled={busy}
-            className="mt-2 rounded-lg bg-teal-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+            className="mt-2 rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
           >
             {busy ? 'Signing in…' : 'Sign In'}
           </button>
@@ -83,7 +83,7 @@ export function SignInPage({ onRegister }: { onRegister: () => void }) {
         <button
           type="button"
           onClick={onRegister}
-          className="mt-4 w-full text-center text-sm text-teal-700 dark:text-teal-400"
+          className="mt-4 w-full text-center text-sm text-accent-700 dark:text-accent-400"
         >
           New here? Create an account
         </button>

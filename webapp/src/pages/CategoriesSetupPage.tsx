@@ -98,7 +98,7 @@ export function CategoriesSetupPage() {
         <button
           onClick={handleAdd}
           disabled={busy || !name.trim()}
-          className="rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          className="rounded-lg bg-accent-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
         >
           {busy ? '…' : 'Add'}
         </button>

@@ -46,9 +46,18 @@ test('the pace assessment sentence is present', async ({ page }) => {
   await expect(assessment.first()).toBeVisible()
 })
 
-test('stat block shows Monthly average, Receipts logged, and Months tracked', async ({ page }) => {
-  for (const label of ['Monthly average', 'Receipts logged', 'Months tracked']) {
-    await expect(page.getByText(label, { exact: true })).toBeVisible()
+test('stat block shows Monthly average, Receipts logged, and Months tracked as a single row', async ({ page }) => {
+  const labels = ['Monthly average', 'Receipts logged', 'Months tracked']
+  const boxes = []
+  for (const label of labels) {
+    const locator = page.getByText(label, { exact: true })
+    await expect(locator).toBeVisible()
+    boxes.push(await locator.boundingBox())
+  }
+  // Three columns, not three stacked rows — same Y position for all three.
+  const [first, ...rest] = boxes
+  for (const box of rest) {
+    expect(Math.abs((box?.y ?? 0) - (first?.y ?? 0))).toBeLessThan(2)
   }
   // Prior-month fixtures guarantee at least one completed month of history.
   const receiptsLogged = page.getByText('Receipts logged', { exact: true }).locator('..')
@@ -73,8 +82,13 @@ test('"Where it went" category breakdown, when shown, lists categories with amou
   expect(sum).toBeLessThanOrEqual(100)
 })
 
-test('"View all receipts" CTA navigates to the full receipts list', async ({ page }) => {
-  await page.getByRole('link', { name: 'View all receipts' }).click()
+test('"View all receipts" CTA is visible without scrolling, and navigates to the full receipts list', async ({ page }) => {
+  const cta = page.getByRole('link', { name: 'View all receipts' })
+  // The whole point of moving the CTA above "Where it went" and shrinking
+  // the hero/stat block was so this is reachable with zero scrolling on a
+  // phone-height viewport — assert that directly, not just that it exists.
+  await expect(cta).toBeInViewport()
+  await cta.click()
   await expect(page).toHaveURL('/receipts')
   await expect(page.getByPlaceholder('Search merchant, item, amount, card…')).toBeVisible()
 })

@@ -1,5 +1,29 @@
 @import "tailwindcss";
 
+/* The "accent" ramp is the Modernist/poster design system's warm red-orange
+   (Claude Design project ccbe8d7a, option 2a), introduced on the Home
+   landing page and now the app's one accent color everywhere else too —
+   this replaces the old teal-* usage 1:1 (same 11 shade steps), so every
+   page that used to read `teal-700`/`dark:teal-400` etc. now reads
+   `accent-700`/`dark:accent-400` for the identical role. 700 is the exact
+   brand hex from the handoff; the rest of the ramp is a same-hue lightness
+   scale built around it, reusing the four hexes the landing page's category
+   bars already used (300/500/800, plus one blended step at 200) so the two
+   don't drift into two slightly different reds. */
+@theme {
+  --color-accent-50: #fef2ef;
+  --color-accent-100: #fde1d9;
+  --color-accent-200: #fbc4b7;
+  --color-accent-300: #ff9783;
+  --color-accent-400: #ff7157;
+  --color-accent-500: #ff563c;
+  --color-accent-600: #f2401f;
+  --color-accent-700: #ec3013;
+  --color-accent-800: #dd2b0f;
+  --color-accent-900: #a82309;
+  --color-accent-950: #5c1305;
+}
+
 :root {
   color-scheme: light dark;
 }
@@ -18,6 +42,11 @@ body {
   -webkit-font-smoothing: antialiased;
   color: #171717;            /* neutral-900 */
   background-color: #fafafa; /* neutral-50  */
+  /* Archivo was previously loaded (see index.html) but scoped to just the
+     Home landing page's poster treatment via a Tailwind class. Now the
+     app-wide default so every re-themed page shares it without repeating
+     the font-family utility on each one. */
+  font-family: 'Archivo', system-ui, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {

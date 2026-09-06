@@ -144,7 +144,7 @@ export function GmailSetupPage() {
           )}
 
           {scanMessage && (
-            <div className="mt-3 rounded-lg bg-teal-50 px-3 py-2 text-xs text-teal-800 dark:bg-teal-950 dark:text-teal-300">
+            <div className="mt-3 rounded-lg bg-accent-50 px-3 py-2 text-xs text-accent-800 dark:bg-accent-950 dark:text-accent-300">
               {scanMessage}
             </div>
           )}
@@ -152,7 +152,7 @@ export function GmailSetupPage() {
           <button
             onClick={handleScanNow}
             disabled={scanning || busy}
-            className="mt-3 w-full rounded-lg bg-teal-700 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+            className="mt-3 w-full rounded-lg bg-accent-700 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
           >
             {scanning ? 'Scanning…' : 'Scan now'}
           </button>
@@ -176,7 +176,7 @@ export function GmailSetupPage() {
 
           <Link
             to="/settings/gmail/log"
-            className="mt-3 block text-sm text-teal-700 dark:text-teal-400"
+            className="mt-3 block text-sm text-accent-700 dark:text-accent-400"
           >
             View scan log →
           </Link>
@@ -186,7 +186,7 @@ export function GmailSetupPage() {
           <button
             onClick={handleConnect}
             disabled={busy}
-            className="w-full rounded-lg bg-teal-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+            className="w-full rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
           >
             {busy ? 'Connecting…' : 'Connect Gmail'}
           </button>

@@ -90,7 +90,7 @@ export function ReceiptsListPage() {
         action={
           <button
             onClick={() => refresh()}
-            className="shrink-0 px-1 text-sm font-medium text-teal-700 dark:text-teal-400"
+            className="shrink-0 px-1 text-sm font-medium text-accent-700 dark:text-accent-400"
             aria-label="Refresh"
           >
             Refresh
@@ -125,11 +125,11 @@ export function ReceiptsListPage() {
       )}
 
       {merged.length > 0 && (
-        <div className="mt-3 rounded-xl border border-teal-300 bg-teal-50 p-3 dark:border-teal-700/60 dark:bg-teal-950/30">
-          <p className="text-sm font-medium text-teal-900 dark:text-teal-200">
+        <div className="mt-3 rounded-xl border border-accent-300 bg-accent-50 p-3 dark:border-accent-700/60 dark:bg-accent-950/30">
+          <p className="text-sm font-medium text-accent-900 dark:text-accent-200">
             🔗 {merged.length} receipt{merged.length === 1 ? '' : 's'} merged from multiple sources
           </p>
-          <p className="mt-0.5 text-xs text-teal-800 dark:text-teal-300/80">
+          <p className="mt-0.5 text-xs text-accent-800 dark:text-accent-300/80">
             A later SMS, email, or photo for the same charge was combined into the original receipt instead of creating a duplicate. Look for the "Merged" tag below.
           </p>
         </div>
@@ -176,7 +176,7 @@ export function ReceiptsListPage() {
             onClick={() => setFilter(f.key)}
             className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ${
               filter === f.key
-                ? 'bg-teal-700 text-white'
+                ? 'bg-accent-700 text-white'
                 : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
             }`}
           >
@@ -199,7 +199,7 @@ export function ReceiptsListPage() {
             {receipts.length === 0 ? "No receipts yet." : 'No receipts match your search.'}
           </p>
           {receipts.length === 0 && (
-            <Link to="/add" className="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white">
+            <Link to="/add" className="rounded-lg bg-accent-700 px-4 py-2 text-sm font-semibold text-white">
               Add your first receipt
             </Link>
           )}

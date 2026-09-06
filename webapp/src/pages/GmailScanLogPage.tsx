@@ -114,7 +114,7 @@ export function GmailScanLogPage() {
                 <button
                   onClick={() => handleRetry(e.id)}
                   disabled={retryingId === e.id}
-                  className="shrink-0 text-xs font-medium text-teal-700 disabled:opacity-60 dark:text-teal-400"
+                  className="shrink-0 text-xs font-medium text-accent-700 disabled:opacity-60 dark:text-accent-400"
                 >
                   {retryingId === e.id ? 'Retrying…' : 'Retry'}
                 </button>

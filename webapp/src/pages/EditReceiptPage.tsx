@@ -78,7 +78,7 @@ export function EditReceiptPage() {
         }
       />
       {hasMergedSources(receipt) && (
-        <div className="mt-3 rounded-xl border border-teal-300 bg-teal-50 p-3 text-sm text-teal-900 dark:border-teal-700/60 dark:bg-teal-950/30 dark:text-teal-200">
+        <div className="mt-3 rounded-xl border border-accent-300 bg-accent-50 p-3 text-sm text-accent-900 dark:border-accent-700/60 dark:bg-accent-950/30 dark:text-accent-200">
           🔗 Merged — this receipt combines data from {receiptSourceLabels(receipt).join(' + ')}. A later import of
           the same charge was folded in here instead of creating a duplicate.
         </div>

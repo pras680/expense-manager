@@ -3,13 +3,12 @@ import { useReceipts } from '../hooks/useReceipts'
 import { useSettings } from '../hooks/useSettings'
 import { needsReview } from '../lib/receiptShape'
 import { computeSpendingInsight, computeTopCategories } from '../lib/spendingInsights'
+import { ACCENT, CATEGORY_BAR_CLASSES } from '../lib/theme'
 
 // Poster hero treatment adapted from the "Modernist" design system exploration
 // (Claude Design project ccbe8d7a, option 2a) — sharp corners, Archivo, and
-// this exact accent ramp are that system's tokens, not this app's usual teal.
-// Kept scoped to this one page rather than adopted app-wide.
-const ACCENT = '#ec3013'
-const CATEGORY_BAR_CLASSES = ['bg-[#dd2b0f]', 'bg-[#ff563c]', 'bg-[#ff9783]', 'bg-[#ffc4b8]']
+// this accent ramp are that system's tokens, now the app's shared theme (see
+// ../lib/theme.ts and index.css) rather than scoped to just this page.
 
 function formatMoney(amount: number, currency: string) {
   try {
@@ -34,7 +33,7 @@ export function LandingPage() {
   const monthsTracked = insight.monthsOfHistory + (insight.thisMonth > 0 ? 1 : 0)
 
   return (
-    <div className="pb-6 font-[Archivo,system-ui,sans-serif]">
+    <div className="pb-6">
       {error && (
         <div className="mx-4 mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           {error}
@@ -43,7 +42,7 @@ export function LandingPage() {
 
       {/* Full-bleed on purpose — the one place on this page that breaks out of
           the app's usual px-4 gutter, for the "poster" effect the design calls for. */}
-      <div className="px-6 py-6 text-white" style={{ background: ACCENT }}>
+      <div className="px-5 py-4 text-white" style={{ background: ACCENT }}>
         <div className="flex items-start justify-between gap-2">
           <span className="border border-white/80 px-2.5 py-1 text-[11px] font-medium tracking-wide">
             {monthLabel} so far
@@ -63,18 +62,57 @@ export function LandingPage() {
             </Link>
           )}
         </div>
-        <div className="mt-3 text-[52px] font-extrabold leading-none tracking-tight">
+        {/* Sized down from the original 52px poster treatment — the page has
+            to fit a stat row and the "View all receipts" CTA above the fold
+            on a phone-height viewport too, and the total doesn't need to be
+            the single biggest thing on screen to still read as the hero. */}
+        <div className="mt-2 text-[34px] font-extrabold leading-none tracking-tight">
           {formatMoney(insight.thisMonth, defaultCurrency)}
         </div>
       </div>
 
       <div className="px-4">
-        <p className="mt-5 text-lg font-semibold leading-snug text-neutral-900 dark:text-neutral-50">
+        <p className="mt-4 text-base font-semibold leading-snug text-neutral-900 dark:text-neutral-50">
           {insight.assessment}
         </p>
 
+        <div className="mt-4 grid grid-cols-3 divide-x divide-neutral-200 border-y border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
+          <div className="flex flex-col items-center gap-0.5 px-1 py-2.5 text-center">
+            <span className="text-[10px] font-bold uppercase leading-tight tracking-wide text-neutral-500 dark:text-neutral-400">
+              Monthly average
+            </span>
+            <span className="text-base font-extrabold text-neutral-900 dark:text-neutral-50">
+              {formatMoney(insight.monthlyAverage, defaultCurrency)}
+            </span>
+          </div>
+          <div className="flex flex-col items-center gap-0.5 px-1 py-2.5 text-center">
+            <span className="text-[10px] font-bold uppercase leading-tight tracking-wide text-neutral-500 dark:text-neutral-400">
+              Receipts logged
+            </span>
+            <span className="text-base font-extrabold text-neutral-900 dark:text-neutral-50">{receipts.length}</span>
+          </div>
+          <div className="flex flex-col items-center gap-0.5 px-1 py-2.5 text-center">
+            <span className="text-[10px] font-bold uppercase leading-tight tracking-wide text-neutral-500 dark:text-neutral-400">
+              Months tracked
+            </span>
+            <span className="text-base font-extrabold text-neutral-900 dark:text-neutral-50">{monthsTracked}</span>
+          </div>
+        </div>
+
+        <Link
+          to="/receipts"
+          className="mt-4 flex h-14 w-full items-center justify-between px-4 text-base font-extrabold text-white"
+          style={{ background: ACCENT }}
+        >
+          View all receipts
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M5 12h14" />
+            <path d="m12 5 7 7-7 7" />
+          </svg>
+        </Link>
+
         {topCategories.length > 0 && (
-          <div className="mt-6">
+          <div className="mt-5">
             <span className="text-xs font-bold uppercase tracking-wider" style={{ color: ACCENT }}>
               Where it went
             </span>
@@ -99,41 +137,6 @@ export function LandingPage() {
             </div>
           </div>
         )}
-
-        <div className="mt-6 divide-y divide-neutral-200 border-t border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-          <div className="flex items-center justify-between py-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-              Monthly average
-            </span>
-            <span className="text-lg font-extrabold text-neutral-900 dark:text-neutral-50">
-              {formatMoney(insight.monthlyAverage, defaultCurrency)}
-            </span>
-          </div>
-          <div className="flex items-center justify-between py-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-              Receipts logged
-            </span>
-            <span className="text-lg font-extrabold text-neutral-900 dark:text-neutral-50">{receipts.length}</span>
-          </div>
-          <div className="flex items-center justify-between py-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-              Months tracked
-            </span>
-            <span className="text-lg font-extrabold text-neutral-900 dark:text-neutral-50">{monthsTracked}</span>
-          </div>
-        </div>
-
-        <Link
-          to="/receipts"
-          className="mt-6 flex h-16 w-full items-center justify-between px-4 text-lg font-extrabold text-white"
-          style={{ background: ACCENT }}
-        >
-          View all receipts
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M5 12h14" />
-            <path d="m12 5 7 7-7 7" />
-          </svg>
-        </Link>
       </div>
     </div>
   )

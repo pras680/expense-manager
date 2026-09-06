@@ -176,7 +176,7 @@ export function AddReceiptPage() {
           <button
             onClick={() => setMode('photo')}
             className={`flex-1 rounded-full py-2 text-sm font-medium ${
-              mode === 'photo' ? 'bg-teal-700 text-white' : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+              mode === 'photo' ? 'bg-accent-700 text-white' : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
             }`}
           >
             Photo
@@ -184,7 +184,7 @@ export function AddReceiptPage() {
           <button
             onClick={() => setMode('text')}
             className={`flex-1 rounded-full py-2 text-sm font-medium ${
-              mode === 'text' ? 'bg-teal-700 text-white' : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+              mode === 'text' ? 'bg-accent-700 text-white' : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
             }`}
           >
             Paste Text
@@ -216,7 +216,7 @@ export function AddReceiptPage() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={busy}
-              className="w-full rounded-lg bg-teal-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+              className="w-full rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
             >
               {busy ? busyLabel || 'Working…' : imagePreviewUrl ? 'Retake / Choose Different File' : '📷 Take Photo or Upload'}
             </button>
@@ -241,7 +241,7 @@ export function AddReceiptPage() {
               <button
                 onClick={handleParseText}
                 disabled={busy || !rawText.trim()}
-                className="flex-1 rounded-lg bg-teal-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+                className="flex-1 rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
               >
                 {busy ? busyLabel || 'Working…' : 'Parse & Review'}
               </button>

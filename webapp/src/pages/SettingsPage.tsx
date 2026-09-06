@@ -50,7 +50,7 @@ function InitialBadge({ label }: { label: string }) {
   const initial = label.trim().charAt(0).toUpperCase() || '?'
   return (
     <span
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-100 text-sm font-semibold text-teal-800 dark:bg-teal-900/50 dark:text-teal-300"
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent-100 text-sm font-semibold text-accent-800 dark:bg-accent-900/50 dark:text-accent-300"
       aria-hidden="true"
     >
       {initial}
@@ -214,7 +214,7 @@ export function SettingsPage() {
             Yours alone — everyone in the household can pick their own. Receipts imported from
             your SMS alerts are converted into this currency.
           </p>
-          {saved && <p className="mt-2 text-xs font-medium text-teal-700 dark:text-teal-400">Saved.</p>}
+          {saved && <p className="mt-2 text-xs font-medium text-accent-700 dark:text-accent-400">Saved.</p>}
           {saveError && <p className="mt-2 text-xs text-red-600">{saveError}</p>}
         </SectionCard>
 
@@ -260,7 +260,7 @@ export function SettingsPage() {
                 </div>
               )}
               {gmailScanMessage && (
-                <div className="mt-2 rounded-lg bg-teal-50 px-3 py-2 text-xs text-teal-800 dark:bg-teal-950 dark:text-teal-300">
+                <div className="mt-2 rounded-lg bg-accent-50 px-3 py-2 text-xs text-accent-800 dark:bg-accent-950 dark:text-accent-300">
                   {gmailScanMessage}
                 </div>
               )}
@@ -269,7 +269,7 @@ export function SettingsPage() {
                 <button
                   onClick={handleGmailScanNow}
                   disabled={gmailScanning}
-                  className="rounded-lg bg-teal-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  className="rounded-lg bg-accent-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
                 >
                   {gmailScanning ? 'Scanning…' : 'Scan now'}
                 </button>
@@ -345,13 +345,13 @@ export function SettingsPage() {
           {/* Shown once. The server never stores a readable copy, so if this is
               lost the password has to be reset from the Supabase dashboard. */}
           {added && (
-            <div className="mt-3 rounded-xl border border-teal-300 bg-teal-50 p-3 dark:border-teal-800 dark:bg-teal-950/40">
-              <p className="text-sm font-semibold text-teal-900 dark:text-teal-200">
+            <div className="mt-3 rounded-xl border border-accent-300 bg-accent-50 p-3 dark:border-accent-800 dark:bg-accent-950/40">
+              <p className="text-sm font-semibold text-accent-900 dark:text-accent-200">
                 {added.displayName} can now sign in
               </p>
               {added.password ? (
                 <>
-                  <p className="mt-1 text-xs text-teal-900 dark:text-teal-300">
+                  <p className="mt-1 text-xs text-accent-900 dark:text-accent-300">
                     Send them these details — the password can't be shown again.
                   </p>
                   <code className="mt-2 block break-all rounded-lg bg-white px-3 py-2 font-mono text-xs dark:bg-neutral-900">
@@ -359,13 +359,13 @@ export function SettingsPage() {
                   </code>
                 </>
               ) : (
-                <p className="mt-1 text-xs text-teal-900 dark:text-teal-300">
+                <p className="mt-1 text-xs text-accent-900 dark:text-accent-300">
                   They already had an account, so their existing password still works.
                 </p>
               )}
               <button
                 onClick={() => setAdded(null)}
-                className="mt-2 rounded-lg bg-teal-700 px-3 py-1.5 text-sm font-medium text-white"
+                className="mt-2 rounded-lg bg-accent-700 px-3 py-1.5 text-sm font-medium text-white"
               >
                 Done
               </button>
@@ -392,7 +392,7 @@ export function SettingsPage() {
             <button
               type="submit"
               disabled={addBusy}
-              className="rounded-lg bg-teal-700 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-accent-700 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
             >
               {addBusy ? 'Adding…' : 'Add to household'}
             </button>

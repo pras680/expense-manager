@@ -25,7 +25,7 @@ test.describe('bottom tab navigation', () => {
 
   test('Home tab is the default landing screen', async ({ page }) => {
     await expect(page).toHaveURL('/')
-    await expect(page.getByRole('link', { name: /Home/ })).toHaveClass(/text-teal-700|text-teal-400/)
+    await expect(page.getByRole('link', { name: /Home/ })).toHaveClass(/text-accent-700|text-accent-400/)
   })
 
   test('Home tab stays active while browsing the full receipts list', async ({ page }) => {
@@ -33,7 +33,7 @@ test.describe('bottom tab navigation', () => {
     await expect(page).toHaveURL('/receipts')
     // NavBar.tsx deliberately keeps Home highlighted for /receipts* routes —
     // there's no separate tab for the list it links out to.
-    await expect(page.getByRole('link', { name: /Home/ })).toHaveClass(/text-teal-700|text-teal-400/)
+    await expect(page.getByRole('link', { name: /Home/ })).toHaveClass(/text-accent-700|text-accent-400/)
   })
 
   test('Add tab opens the add-receipt screen', async ({ page }) => {

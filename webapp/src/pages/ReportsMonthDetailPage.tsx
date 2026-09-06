@@ -67,10 +67,10 @@ export function ReportsMonthDetailPage() {
 
       <Link
         to={`/reports/category/All?month=${key}`}
-        className="mt-4 flex items-center justify-between rounded-lg border-2 border-teal-600 bg-teal-50 px-4 py-3 dark:border-teal-500 dark:bg-teal-950/40"
+        className="mt-4 flex items-center justify-between rounded-lg border-2 border-accent-600 bg-accent-50 px-4 py-3 dark:border-accent-500 dark:bg-accent-950/40"
       >
-        <span className="text-sm font-bold text-teal-900 dark:text-teal-100">All Receipts</span>
-        <span className="text-sm font-semibold text-teal-900 dark:text-teal-100">
+        <span className="text-sm font-bold text-accent-900 dark:text-accent-100">All Receipts</span>
+        <span className="text-sm font-semibold text-accent-900 dark:text-accent-100">
           {formatMoney(total, defaultCurrency)}
         </span>
       </Link>

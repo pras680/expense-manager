@@ -82,19 +82,19 @@ export function ReportsOverviewPage() {
       <div className="mt-4 grid grid-cols-2 gap-3">
         <Link
           to="/reports/monthly"
-          className="flex flex-col gap-1 rounded-2xl border-2 border-teal-600 bg-teal-50 p-4 active:bg-teal-100 dark:border-teal-500 dark:bg-teal-950/40 dark:active:bg-teal-950/70"
+          className="flex flex-col gap-1 rounded-2xl border-2 border-accent-600 bg-accent-50 p-4 active:bg-accent-100 dark:border-accent-500 dark:bg-accent-950/40 dark:active:bg-accent-950/70"
         >
           <span className="text-2xl" aria-hidden="true">📅</span>
-          <span className="text-base font-bold text-teal-900 dark:text-teal-100">Monthly</span>
-          <span className="text-xs text-teal-800/80 dark:text-teal-300/80">Spend broken down by month</span>
+          <span className="text-base font-bold text-accent-900 dark:text-accent-100">Monthly</span>
+          <span className="text-xs text-accent-800/80 dark:text-accent-300/80">Spend broken down by month</span>
         </Link>
         <Link
           to="/reports/categories"
-          className="flex flex-col gap-1 rounded-2xl border-2 border-teal-600 bg-teal-50 p-4 active:bg-teal-100 dark:border-teal-500 dark:bg-teal-950/40 dark:active:bg-teal-950/70"
+          className="flex flex-col gap-1 rounded-2xl border-2 border-accent-600 bg-accent-50 p-4 active:bg-accent-100 dark:border-accent-500 dark:bg-accent-950/40 dark:active:bg-accent-950/70"
         >
           <span className="text-2xl" aria-hidden="true">🏷️</span>
-          <span className="text-base font-bold text-teal-900 dark:text-teal-100">By Category</span>
-          <span className="text-xs text-teal-800/80 dark:text-teal-300/80">Spend broken down by category</span>
+          <span className="text-base font-bold text-accent-900 dark:text-accent-100">By Category</span>
+          <span className="text-xs text-accent-800/80 dark:text-accent-300/80">Spend broken down by category</span>
         </Link>
       </div>
 
@@ -103,7 +103,7 @@ export function ReportsOverviewPage() {
         {last3Months.map((m) => (
           <Link key={m.key} to={`/reports/monthly/${m.key}`} className="flex flex-1 flex-col items-center gap-1">
             <div
-              className="w-full rounded-t bg-teal-600"
+              className="w-full rounded-t bg-accent-600"
               style={{ height: `${Math.max(4, (m.total / maxMonth) * 80)}px` }}
               title={formatMoney(m.total, defaultCurrency)}
             />
@@ -130,7 +130,7 @@ export function ReportsOverviewPage() {
               </span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
-              <div className="h-full rounded-full bg-teal-600" style={{ width: `${(total / maxCategory) * 100}%` }} />
+              <div className="h-full rounded-full bg-accent-600" style={{ width: `${(total / maxCategory) * 100}%` }} />
             </div>
           </Link>
         ))}

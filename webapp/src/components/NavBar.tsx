@@ -28,7 +28,7 @@ export function NavBar() {
               key={tab.to}
               to={tab.to}
               className={`flex flex-col items-center justify-center gap-0.5 py-2.5 text-xs font-medium ${
-                active ? 'text-teal-700 dark:text-teal-400' : 'text-neutral-500 dark:text-neutral-400'
+                active ? 'text-accent-700 dark:text-accent-400' : 'text-neutral-500 dark:text-neutral-400'
               }`}
             >
               <span className="text-xl leading-none">{tab.icon}</span>
