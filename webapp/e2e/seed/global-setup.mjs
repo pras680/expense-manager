@@ -5,6 +5,7 @@
 // Deliberately does NOT fail the run when credentials are missing — specs
 // already self-skip via test.skip(!EMAIL || !PASSWORD, ...) in that case,
 // and globalSetup throwing would turn that into a hard failure instead.
+import './load-env.mjs'
 import { seedSampleReceipts } from './seed.mjs'
 
 export default async function globalSetup() {

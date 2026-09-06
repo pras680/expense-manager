@@ -1,4 +1,9 @@
 import { defineConfig, devices } from '@playwright/test'
+// Loads webapp/.env.local and webapp/.env.e2e.local (both gitignored) before
+// anything below reads process.env — this must run before spec files are
+// discovered, since each spec's test.skip(!EMAIL || !PASSWORD, ...) check
+// runs at module-load time, not inside globalSetup's own process timing.
+import './e2e/seed/load-env.mjs'
 
 // TEST_USER_EMAIL/TEST_USER_PASSWORD must be a real signed-up account in the
 // Supabase project the webapp points at (see src/lib/supabaseClient.ts) —
