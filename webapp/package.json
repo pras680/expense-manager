@@ -9,7 +9,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "seed:test-data": "node e2e/seed/seed.mjs",
+    "seed:test-data:reset": "node e2e/seed/seed.mjs --reset"
   },
   "dependencies": {
     "pdfjs-dist": "^6.2.108",

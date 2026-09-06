@@ -6,6 +6,10 @@ import { defineConfig, devices } from '@playwright/test'
 // these aren't set, rather than failing on every fresh clone.
 export default defineConfig({
   testDir: './e2e',
+  // Re-seeds the test account's sample receipts before every run — see
+  // e2e/seed/global-setup.mjs. No-ops (doesn't fail) when TEST_USER_EMAIL/
+  // TEST_USER_PASSWORD aren't set, same as the specs' own self-skip.
+  globalSetup: './e2e/seed/global-setup.mjs',
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,

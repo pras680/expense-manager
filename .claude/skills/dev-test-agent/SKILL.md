@@ -2,12 +2,14 @@
 name: dev-test-agent
 description: >
   Implement a requested change to the webapp, then verify it by running the
-  webapp for real in Chrome and driving it with Playwright — bottom-tab
-  navigation, settings sub-pages, and (if the change touches them) whatever
-  other flows apply. Use when the user describes a feature/bug-fix and wants
-  it built AND smoke-tested end-to-end, not just code-reviewed. Invokable
-  from any Claude Code surface on this repo (CLI, web, or the mobile app) —
-  they all share this skill and the same e2e suite.
+  webapp for real in Chrome against a seeded test account with sample
+  receipts, driving it with Playwright — bottom-tab navigation, settings
+  sub-pages, and receipt-processing flows (search, categories, the
+  unreviewed queue, reports) that need real data to exercise. Use when the
+  user describes a feature/bug-fix and wants it built AND smoke-tested
+  end-to-end, not just code-reviewed. Invokable from any Claude Code surface
+  on this repo (CLI, web, or the mobile app) — they all share this skill and
+  the same e2e suite and seed data.
 ---
 
 # Dev + test agent
@@ -51,8 +53,21 @@ an open Chrome window from a previous session; each run starts its own.
      (or offer to create one via Settings → Household → "Add someone" if
      you're already signed in as an existing member during this session) —
      never reuse a real household member's real password for automation.
+   - This account should be dedicated to testing, not shared with manual
+     use — its sample receipts get wiped and re-created on every run (see
+     step 5), so any real receipts placed on it wouldn't survive.
 
-4. **Install Playwright's browser binary once, if missing.** This
+4. **Sample data comes from `webapp/e2e/seed/`, not from you typing test
+   receipts by hand.** `seed/sample-receipts.json` defines ~10 fixture
+   receipts spanning categories, sources (manual/sms/gmail), review state,
+   currency, and visibility — enough for a spec to search for a merchant,
+   check a category badge, or confirm the unreviewed-review banner without
+   needing `parse-receipt` or a real bank SMS/email in the loop. If a change
+   needs a new kind of sample data to test against (a new category, a
+   reversal, a merge scenario), add a fixture to that JSON file — give it a
+   unique `key` — rather than improvising one-off data inside a spec.
+
+5. **Install Playwright's browser binary once, if missing.** This
    environment pre-installs Chromium at `/opt/pw-browsers/chromium` for
    Claude Code sessions in general — check `PLAYWRIGHT_BROWSERS_PATH` /
    `/opt/pw-browsers` before running `npx playwright install`, which would
@@ -60,7 +75,7 @@ an open Chrome window from a previous session; each run starts its own.
    `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium` when that binary is
    present (see `webapp/playwright.config.ts`).
 
-5. **Run the suite** from `webapp/`:
+6. **Run the suite** from `webapp/`:
    ```bash
    cd webapp
    npm install   # first run only, or after package.json changes
@@ -69,35 +84,38 @@ an open Chrome window from a previous session; each run starts its own.
      npm run test:e2e
    ```
    This starts `vite dev` on `localhost:5173` automatically
-   (`playwright.config.ts`'s `webServer` block) and runs the suite against
-   both a desktop-Chromium project and a mobile-viewport-Chromium project —
-   don't start `vite dev` by hand first, Playwright manages its lifecycle
-   and will reuse one that's already running locally.
+   (`playwright.config.ts`'s `webServer` block), **re-seeds the sample
+   receipts** (`globalSetup` runs `seed/seed.mjs --reset` before anything
+   else — see `webapp/e2e/README.md`), and runs the suite against both a
+   desktop-Chromium project and a mobile-viewport-Chromium project — don't
+   start `vite dev` by hand first, Playwright manages its lifecycle and will
+   reuse one that's already running locally.
 
-   To run just the navigation smoke test:
+   To run just the navigation smoke test, or just the sample-data spec:
    ```bash
    npm run test:e2e -- e2e/navigation.spec.ts
+   npm run test:e2e -- e2e/receipts-data.spec.ts
    ```
 
-6. **On failure**, open the HTML report (`npx playwright show-report`) or
+7. **On failure**, open the HTML report (`npx playwright show-report`) or
    read the trace/screenshot Playwright attaches on failure
    (`test-results/`) before guessing — then fix the root cause (usually in
    `webapp/src/`, per this repo's own convention of backend/logic bugs over
    UI bugs) and re-run. Don't mark the task done on a red suite.
 
-7. **Report back**: what changed, which spec(s) ran, pass/fail per test, and
+8. **Report back**: what changed, which spec(s) ran, pass/fail per test, and
    for any failure, the concrete cause found from the trace/screenshot — not
    just "a test failed."
 
 ## The default "smoke" scope
 
-`webapp/e2e/navigation.spec.ts` — sign in, then for each bottom tab
-(Receipts, Add, Reports, Settings) confirm the route changes and the page
-renders, plus the Settings sub-links (SMS, Categories, Gmail) and sign-out.
-This is deliberately cheap to run on every change; see
-`webapp/e2e/README.md` for how to extend the suite with deeper flows
-(receipt CRUD, duplicate-merge, reports totals) as those need covering —
-add new files there rather than growing `navigation.spec.ts` into a catch-all.
+`webapp/e2e/navigation.spec.ts` (bottom-tab navigation, settings sub-pages,
+sign-out) plus `webapp/e2e/receipts-data.spec.ts` (search, category badges,
+the unreviewed queue, and Reports — all against the seeded sample receipts).
+Both are deliberately cheap and read-only, so they're safe to run on every
+change; see `webapp/e2e/README.md` for how to extend the suite with deeper,
+mutating flows (receipt CRUD, duplicate-merge) as those need covering — add
+new spec files rather than growing either existing one into a catch-all.
 
 ## Boundaries
 
