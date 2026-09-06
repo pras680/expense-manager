@@ -13,9 +13,9 @@ async function signIn(page: Page) {
   await page.getByLabel('Email').fill(EMAIL!)
   await page.getByLabel('Password').fill(PASSWORD!)
   await page.getByRole('button', { name: 'Sign In' }).click()
-  // Landing page after sign-in is the receipts list; NavBar only renders
-  // once the router mounts, i.e. once a session exists.
-  await expect(page.getByRole('link', { name: /Receipts/ })).toBeVisible()
+  // Landing screen after sign-in is the Home tab (LandingPage, "/") — NavBar
+  // only renders once the router mounts, i.e. once a session exists.
+  await expect(page.getByRole('link', { name: /Home/ })).toBeVisible()
 }
 
 test.describe('bottom tab navigation', () => {
@@ -23,9 +23,17 @@ test.describe('bottom tab navigation', () => {
     await signIn(page)
   })
 
-  test('Receipts tab is the default landing screen', async ({ page }) => {
+  test('Home tab is the default landing screen', async ({ page }) => {
     await expect(page).toHaveURL('/')
-    await expect(page.getByRole('link', { name: /Receipts/ })).toHaveClass(/text-teal-700|text-teal-400/)
+    await expect(page.getByRole('link', { name: /Home/ })).toHaveClass(/text-teal-700|text-teal-400/)
+  })
+
+  test('Home tab stays active while browsing the full receipts list', async ({ page }) => {
+    await page.getByRole('link', { name: 'View all receipts' }).click()
+    await expect(page).toHaveURL('/receipts')
+    // NavBar.tsx deliberately keeps Home highlighted for /receipts* routes —
+    // there's no separate tab for the list it links out to.
+    await expect(page.getByRole('link', { name: /Home/ })).toHaveClass(/text-teal-700|text-teal-400/)
   })
 
   test('Add tab opens the add-receipt screen', async ({ page }) => {
@@ -38,12 +46,12 @@ test.describe('bottom tab navigation', () => {
     await expect(page).toHaveURL('/reports')
   })
 
-  test('Settings tab opens settings and back to Receipts works', async ({ page }) => {
+  test('Settings tab opens settings and back to Home works', async ({ page }) => {
     await page.getByRole('link', { name: /Settings/ }).click()
     await expect(page).toHaveURL('/settings')
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible()
 
-    await page.getByRole('link', { name: /Receipts/ }).click()
+    await page.getByRole('link', { name: /Home/ }).click()
     await expect(page).toHaveURL('/')
   })
 })

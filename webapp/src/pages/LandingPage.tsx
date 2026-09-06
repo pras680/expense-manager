@@ -51,8 +51,14 @@ export function LandingPage() {
           {reviewCount > 0 && (
             <Link
               to="/receipts?review=1"
-              className="border border-white/80 px-2.5 py-1 text-[11px] font-medium tracking-wide"
+              className="inline-flex items-center gap-1.5 bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide"
+              style={{ color: ACCENT }}
             >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 9v4" />
+                <path d="M12 17h.01" />
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.71 3.86a2 2 0 0 0-3.42 0Z" />
+              </svg>
               {reviewCount} to review
             </Link>
           )}
