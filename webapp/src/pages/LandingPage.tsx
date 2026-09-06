@@ -35,8 +35,12 @@ export function LandingPage() {
 
   return (
     <div className="pb-6 font-[Archivo,system-ui,sans-serif]">
+      <div className="px-4 pt-4 pb-3 text-2xl font-extrabold tracking-tight text-neutral-900 dark:text-neutral-50">
+        Bill Skills
+      </div>
+
       {error && (
-        <div className="mx-4 mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div className="mx-4 mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           {error}
         </div>
       )}
