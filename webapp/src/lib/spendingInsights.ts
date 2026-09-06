@@ -111,3 +111,41 @@ export function computeSpendingInsight(receipts: Receipt[], now = new Date()): S
     assessment
   }
 }
+
+export interface CategorySpend {
+  category: string
+  amount: number
+  /** Share of this month's total expense spend, 0–100 rounded. */
+  sharePct: number
+  /** Amount relative to the largest category returned — for a comparative bar width, not an absolute measure. */
+  barPct: number
+}
+
+/** Top categories by spend for the current calendar month, largest first. */
+export function computeTopCategories(receipts: Receipt[], now = new Date(), limit = 4): CategorySpend[] {
+  const currentKey = monthKey(now)
+  const byCategory = new Map<string, number>()
+  let total = 0
+  for (const r of receipts) {
+    if (!r.date || !isExpenseReceipt(r)) continue
+    const d = new Date(r.date)
+    if (Number.isNaN(d.getTime()) || monthKey(d) !== currentKey) continue
+    const amount = reportingTotal(r) ?? 0
+    const category = r.category || 'Miscellaneous'
+    byCategory.set(category, (byCategory.get(category) ?? 0) + amount)
+    total += amount
+  }
+  if (total <= 0) return []
+
+  const top = Array.from(byCategory.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+  const max = top[0]?.[1] ?? 0
+
+  return top.map(([category, amount]) => ({
+    category,
+    amount,
+    sharePct: Math.round((amount / total) * 100),
+    barPct: max > 0 ? Math.round((amount / max) * 100) : 0
+  }))
+}

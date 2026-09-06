@@ -49,7 +49,7 @@ export function EditReceiptPage() {
   async function handleSubmit(input: ReceiptWriteInput) {
     await updateReceipt(receipt!.id, input)
     await refresh()
-    navigate('/')
+    navigate('/receipts')
   }
 
   async function handleDelete() {
@@ -57,7 +57,7 @@ export function EditReceiptPage() {
     try {
       await deleteReceipt(receipt!.id)
       await refresh()
-      navigate('/')
+      navigate('/receipts')
     } finally {
       setDeleting(false)
     }
@@ -67,7 +67,7 @@ export function EditReceiptPage() {
     <div className="px-4 pt-4 pb-6">
       <PageHeader
         title="Edit Receipt"
-        backTo="/"
+        backTo="/receipts"
         action={
           <button
             onClick={() => setConfirmingDelete(true)}
