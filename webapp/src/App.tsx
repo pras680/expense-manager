@@ -6,6 +6,7 @@ import { ReceiptsProvider } from './hooks/useReceipts'
 import { SettingsProvider } from './hooks/useSettings'
 import { SignInPage } from './pages/SignInPage'
 import { RegisterPage } from './pages/RegisterPage'
+import { LandingPage } from './pages/LandingPage'
 import { ReceiptsListPage } from './pages/ReceiptsListPage'
 import { AddReceiptPage } from './pages/AddReceiptPage'
 import { EditReceiptPage } from './pages/EditReceiptPage'
@@ -65,8 +66,9 @@ function AuthGate() {
             }}
           >
             <Routes>
-              <Route path="/" element={<ReceiptsListPage />} />
+              <Route path="/" element={<LandingPage />} />
               <Route path="/add" element={<AddReceiptPage />} />
+              <Route path="/receipts" element={<ReceiptsListPage />} />
               <Route path="/receipts/:id/edit" element={<EditReceiptPage />} />
               <Route path="/reports" element={<ReportsOverviewPage />} />
               <Route path="/reports/category/:category" element={<ReportsByCategoryPage />} />

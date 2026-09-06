@@ -157,7 +157,7 @@ export function AddReceiptPage() {
     // insertOrMergeReceipt.
     await insertOrMergeReceipt(input)
     await refresh()
-    navigate('/')
+    navigate('/receipts')
   }
 
   function reset() {

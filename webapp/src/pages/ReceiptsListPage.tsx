@@ -1,14 +1,13 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useReceipts } from '../hooks/useReceipts'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { ReceiptCard } from '../components/ReceiptCard'
 import { StatTile } from '../components/StatTile'
+import { PageHeader } from '../components/PageHeader'
 import { receiptMatches, reportingTotal, needsReview, isExpenseReceipt, hasMergedSources } from '../lib/receiptShape'
 import { markReceiptsReviewed } from '../lib/supabaseClient'
-import { MonthOverview } from '../components/MonthOverview'
-import { computeSpendingInsight } from '../lib/spendingInsights'
 
 type FilterKey = 'all' | 'last30' | 'noDate'
 type OwnerFilter = 'everyone' | 'mine'
@@ -23,13 +22,16 @@ export function ReceiptsListPage() {
   const { receipts, loading, error, refresh } = useReceipts()
   const { defaultCurrency } = useSettings()
   const { session } = useAuth()
+  const [searchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<FilterKey>('all')
   const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('everyone')
   // Auto-imported receipts nobody has confirmed yet. These are the reason the
   // banner exists: they were parsed by an LLM unattended, so amounts and dates
-  // can be wrong and the user needs a nudge to look.
-  const [onlyUnreviewed, setOnlyUnreviewed] = useState(false)
+  // can be wrong and the user needs a nudge to look. Pre-set by the "N to
+  // review" tag on the Home landing page (?review=1), so tapping it lands
+  // here already filtered instead of requiring a second tap.
+  const [onlyUnreviewed, setOnlyUnreviewed] = useState(() => searchParams.get('review') === '1')
   const [clearing, setClearing] = useState(false)
 
   const unreviewed = useMemo(() => receipts.filter(needsReview), [receipts])
@@ -71,10 +73,6 @@ export function ReceiptsListPage() {
     () => filtered.filter(isExpenseReceipt).reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
     [filtered]
   )
-  // Deliberately computed from all receipts, not `filtered` — the month summary
-  // is a fixed fact about the household, and would be nonsense if a search box
-  // could change "what you've spent this month".
-  const insight = useMemo(() => computeSpendingInsight(receipts), [receipts])
 
   function formatMoney(amount: number) {
     try {
@@ -86,16 +84,19 @@ export function ReceiptsListPage() {
 
   return (
     <div className="px-4 pt-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-neutral-900 dark:text-neutral-50">Receipts</h1>
-        <button
-          onClick={() => refresh()}
-          className="text-sm text-teal-700 dark:text-teal-400"
-          aria-label="Refresh"
-        >
-          Refresh
-        </button>
-      </div>
+      <PageHeader
+        title="Receipts"
+        backTo="/"
+        action={
+          <button
+            onClick={() => refresh()}
+            className="shrink-0 px-1 text-sm font-medium text-teal-700 dark:text-teal-400"
+            aria-label="Refresh"
+          >
+            Refresh
+          </button>
+        }
+      />
 
       {unreviewed.length > 0 && (
         <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-700/60 dark:bg-amber-950/40">
@@ -134,18 +135,11 @@ export function ReceiptsListPage() {
         </div>
       )}
 
-      <div className="mt-3">
-        <MonthOverview insight={insight} currency={defaultCurrency} />
-      </div>
-
-      {/* These reflect the current filter, unlike the month summary above. */}
+      {/* This month's overview now lives on the Home landing page — these two
+          reflect the current search/filter, which the landing page can't. */}
       <div className="mt-3 flex gap-2">
         <StatTile label="Shown" value={formatMoney(totalSpend)} />
         <StatTile label="Receipts" value={String(filtered.length)} />
-        <StatTile
-          label="Months tracked"
-          value={String(insight.monthsOfHistory + (insight.thisMonth > 0 ? 1 : 0))}
-        />
       </div>
 
       <input
