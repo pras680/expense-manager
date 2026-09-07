@@ -80,7 +80,7 @@ test.describe('settings sub-navigation', () => {
   })
 })
 
-test.describe('receipt edit back navigation', () => {
+test.describe('receipt edit', () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
     await page.getByRole('link', { name: 'View all receipts' }).click()
@@ -104,6 +104,47 @@ test.describe('receipt edit back navigation', () => {
 
     await page.getByRole('button', { name: 'Go back' }).click()
     await expect(page).toHaveURL('/')
+  })
+
+  test('an edited category persists to the database, not just the in-memory list', async ({ page }) => {
+    // Regression guard: buildReceiptBody (supabaseClient.ts) used to gate
+    // category/card_last4/card_bank behind the same "optional columns"
+    // fallback as genuinely-optional fields (receipt_amount, conversion_rate,
+    // etc.). On a deployment missing those other columns — which this test
+    // account's does — PostgREST rejects the first write attempt, and the
+    // retry (which exists only to drop the genuinely-missing columns)
+    // silently dropped category too. The save looked successful, but the
+    // category column never actually changed. A hard reload here forces a
+    // fresh fetch from the DB rather than any client-side state, which is
+    // exactly what "not persistent on the DB" describes.
+    const firstReceipt = page.locator('a[href^="/receipts/"][href$="/edit"]').first()
+    await firstReceipt.waitFor()
+    await firstReceipt.click()
+    await expect(page).toHaveURL(/\/receipts\/.+\/edit/)
+    const editUrl = page.url()
+
+    const categorySelect = page.getByLabel('Category')
+    const originalCategory = await categorySelect.inputValue()
+    const newCategory = originalCategory === 'Travel' ? 'Miscellaneous' : 'Travel'
+
+    try {
+      await categorySelect.selectOption(newCategory)
+      await page.getByRole('button', { name: /Save Changes/ }).click()
+      await expect(page).toHaveURL('/receipts')
+
+      // A fresh page.goto (not an in-app Link click) forces a real reload —
+      // a full refetch from the DB, not any client-side state left over
+      // from the save above.
+      await page.goto(editUrl)
+      await expect(page.getByLabel('Category')).toHaveValue(newCategory)
+    } finally {
+      // Restore regardless of pass/fail, so a later test reading this same
+      // seeded receipt's category isn't affected by this one.
+      await page.goto(editUrl)
+      await page.getByLabel('Category').selectOption(originalCategory)
+      await page.getByRole('button', { name: /Save Changes/ }).click()
+      await expect(page).toHaveURL('/receipts')
+    }
   })
 })
 

@@ -126,6 +126,19 @@ function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: bool
     visibility: input.visibility,
     source: input.source ?? 'manual',
     comment: input.comment || null,
+    // Confirmed real top-level columns on every deployed environment (unlike
+    // the truly-optional ones below) — these must always be sent, never
+    // gated behind includeOptionalColumns. They used to live in that block
+    // too, which meant a schema-cache miss on one of the *actually* optional
+    // columns (e.g. receipt_amount, missing on some deployments) made the
+    // retry-without-optional-columns path silently drop category/card_last4/
+    // card_bank as well: the retry itself succeeded, so the save looked
+    // fine, but the real category column never changed — only the copy
+    // inside raw_ocr_json did, which nothing reads back from once the
+    // top-level column already holds a non-null (if stale) value.
+    category: input.category,
+    card_last4: input.cardLast4,
+    card_bank: input.cardBank,
     // A receipt the user typed or corrected by hand needs no separate review
     // step — filling the form IS the review.
     reviewed_at: new Date().toISOString(),
@@ -153,9 +166,6 @@ function buildReceiptBody(input: ReceiptWriteInput, includeOptionalColumns: bool
     body.receipt_currency = input.receiptCurrency
     body.conversion_rate = input.conversionRate
     body.converted_total = input.convertedTotal
-    body.category = input.category
-    body.card_last4 = input.cardLast4
-    body.card_bank = input.cardBank
     body.transfer_from_bank = input.transferFromBank
     body.transfer_to_bank = input.transferToBank
     body.transfer_kind = input.transferKind
