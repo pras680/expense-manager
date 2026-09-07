@@ -34,15 +34,28 @@ export function LandingPage() {
 
   return (
     <div className="pb-6">
-      {/* nav-brand in the source mockup renders at 58px (font-weight 800) —
-          this app has no top nav to hold it (nav is the bottom tab bar), so it
-          gets its own line. Sized down from the mockup's scale (and given
-          less top/bottom padding) along with the hero total below it — see
-          that panel's comment — to keep "View all receipts" reachable
-          without scrolling on a phone-height viewport. */}
-      <div className="px-4 pt-3 pb-1 text-[26px] font-extrabold leading-none tracking-tight text-neutral-900 dark:text-neutral-50">
-        Bill Skills
+      {/* nav-brand in the source mockup renders at 58px inline in a desktop
+          top nav; this app's nav is a bottom tab bar, so it gets its own
+          line instead. There's plenty of vertical budget below the fold
+          line the CTA needs to clear (see that panel's comment), so this
+          can run bigger than a bare page-title would — the icon badge turns
+          it into an actual wordmark instead of a plain text label, and the
+          accent rule underneath gives the title block its own graphic
+          weight before the poster hero takes over. */}
+      <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center text-white" style={{ background: ACCENT }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M6 2h12a1 1 0 0 1 1 1v18l-2.5-1.5L14 21l-2.5-1.5L9 21l-2.5-1.5L4 21V3a1 1 0 0 1 1-1Z" />
+            <path d="M8 7h8" />
+            <path d="M8 11h8" />
+            <path d="M8 15h5" />
+          </svg>
+        </div>
+        <span className="text-[36px] font-extrabold leading-none tracking-tight text-neutral-900 dark:text-neutral-50">
+          Bill Skills
+        </span>
       </div>
+      <div className="mx-4 mb-4 h-1.5 w-20" style={{ background: ACCENT }} />
 
       {error && (
         <div className="mx-4 mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
