@@ -29,9 +29,9 @@ export function ReceiptsListPage() {
   // Auto-imported receipts nobody has confirmed yet. These are the reason the
   // banner exists: they were parsed by an LLM unattended, so amounts and dates
   // can be wrong and the user needs a nudge to look. Pre-set by the "N to
-  // review" tag on the Home landing page (?review=1), so tapping it lands
-  // here already filtered instead of requiring a second tap.
-  const [onlyUnreviewed, setOnlyUnreviewed] = useState(() => searchParams.get('review') === '1')
+  // review" link on the Home landing page (?filter=pending), so tapping it
+  // lands here already filtered instead of requiring a second tap.
+  const [onlyUnreviewed, setOnlyUnreviewed] = useState(() => searchParams.get('filter') === 'pending')
   const [clearing, setClearing] = useState(false)
 
   const unreviewed = useMemo(() => receipts.filter(needsReview), [receipts])

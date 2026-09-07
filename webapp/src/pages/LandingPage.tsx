@@ -34,8 +34,18 @@ export function LandingPage() {
 
   return (
     <div className="pb-6">
+      {/* nav-brand in the source mockup renders at 58px (font-weight 800) —
+          this app has no top nav to hold it (nav is the bottom tab bar), so it
+          gets its own line. Sized down from the mockup's scale (and given
+          less top/bottom padding) along with the hero total below it — see
+          that panel's comment — to keep "View all receipts" reachable
+          without scrolling on a phone-height viewport. */}
+      <div className="px-4 pt-3 pb-1 text-[26px] font-extrabold leading-none tracking-tight text-neutral-900 dark:text-neutral-50">
+        Bill Skills
+      </div>
+
       {error && (
-        <div className="mx-4 mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div className="mx-4 mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           {error}
         </div>
       )}
@@ -49,9 +59,9 @@ export function LandingPage() {
           </span>
           {reviewCount > 0 && (
             <Link
-              to="/receipts?review=1"
-              className="inline-flex items-center gap-1.5 bg-white px-2.5 py-1 text-[11px] font-bold tracking-wide"
-              style={{ color: ACCENT }}
+              to="/receipts?filter=pending"
+              className="flex shrink-0 items-center gap-1.5 bg-white px-3 py-1.5 text-[13px] font-bold"
+              style={{ color: '#7c1405' }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M12 9v4" />

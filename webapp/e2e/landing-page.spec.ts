@@ -99,5 +99,5 @@ test('the "N to review" link goes to the receipts list filtered for review', asy
   // should always be present against the seeded test account.
   await expect(reviewLink).toBeVisible()
   await reviewLink.click()
-  await expect(page).toHaveURL(/\/receipts\?review=1/)
+  await expect(page).toHaveURL(/\/receipts\?filter=pending/)
 })
