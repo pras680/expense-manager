@@ -80,6 +80,33 @@ test.describe('settings sub-navigation', () => {
   })
 })
 
+test.describe('receipt edit back navigation', () => {
+  test.beforeEach(async ({ page }) => {
+    await signIn(page)
+    await page.getByRole('link', { name: 'View all receipts' }).click()
+    await expect(page).toHaveURL('/receipts')
+  })
+
+  test('saving an edited receipt does not leave a stale edit screen in the back stack', async ({ page }) => {
+    // Regression guard: EditReceiptPage's save used to `navigate('/receipts')`
+    // — a plain push — which left the just-saved edit screen sitting in the
+    // back stack. The next back tap from /receipts would then land right
+    // back on that stale edit page instead of leaving the flow, which felt
+    // like the back button was stuck in a loop. Save must now pop back
+    // instead, so one back tap from here goes all the way to Home.
+    const firstReceipt = page.locator('a[href^="/receipts/"][href$="/edit"]').first()
+    await firstReceipt.waitFor()
+    await firstReceipt.click()
+    await expect(page).toHaveURL(/\/receipts\/.+\/edit/)
+
+    await page.getByRole('button', { name: /Save Changes/ }).click()
+    await expect(page).toHaveURL('/receipts')
+
+    await page.getByRole('button', { name: 'Go back' }).click()
+    await expect(page).toHaveURL('/')
+  })
+})
+
 test('sign out returns to the sign-in screen', async ({ page }) => {
   await signIn(page)
   await page.getByRole('link', { name: /Settings/ }).click()

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { canGoBack } from '../lib/navigation'
+import { goBack } from '../lib/navigation'
 
 interface PageHeaderProps {
   title: string
@@ -16,21 +16,11 @@ interface PageHeaderProps {
 export function PageHeader({ title, backTo, action }: PageHeaderProps) {
   const navigate = useNavigate()
 
-  function goBack() {
-    // Popping gives the true previous screen; the fallback only applies when
-    // there is no in-app history (deep link, reload, PWA cold start).
-    if (canGoBack()) {
-      navigate(-1)
-    } else {
-      navigate(backTo, { replace: true })
-    }
-  }
-
   return (
     <div className="flex items-center gap-1">
       <button
         type="button"
-        onClick={goBack}
+        onClick={() => goBack(navigate, backTo)}
         aria-label="Go back"
         // -ml-2 pulls the 44px touch target back so the glyph still lines up
         // with the page's 16px gutter.

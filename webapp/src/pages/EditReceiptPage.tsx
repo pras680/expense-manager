@@ -8,6 +8,7 @@ import { useSettings } from '../hooks/useSettings'
 import { updateReceipt, deleteReceipt, type ReceiptWriteInput } from '../lib/supabaseClient'
 import { displayReceiptAmount, displayReceiptCurrency, hasMergedSources, receiptSourceLabels } from '../lib/receiptShape'
 import { DEFAULT_CURRENCY } from '../lib/categories'
+import { goBack } from '../lib/navigation'
 
 export function EditReceiptPage() {
   const { id } = useParams<{ id: string }>()
@@ -49,7 +50,11 @@ export function EditReceiptPage() {
   async function handleSubmit(input: ReceiptWriteInput) {
     await updateReceipt(receipt!.id, input)
     await refresh()
-    navigate('/receipts')
+    // Pop back to wherever this edit was opened from (always /receipts today)
+    // instead of pushing a fresh entry — a push would leave this now-stale
+    // edit screen sitting in the back stack, so the next back tap from
+    // /receipts would land right back on it instead of leaving the flow.
+    goBack(navigate, '/receipts')
   }
 
   async function handleDelete() {
@@ -57,7 +62,7 @@ export function EditReceiptPage() {
     try {
       await deleteReceipt(receipt!.id)
       await refresh()
-      navigate('/receipts')
+      goBack(navigate, '/receipts')
     } finally {
       setDeleting(false)
     }

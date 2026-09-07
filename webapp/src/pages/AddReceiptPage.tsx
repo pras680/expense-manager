@@ -157,7 +157,14 @@ export function AddReceiptPage() {
     // insertOrMergeReceipt.
     await insertOrMergeReceipt(input)
     await refresh()
-    navigate('/receipts')
+    // The Add tab can be reached from any of the other three tabs, so unlike
+    // EditReceiptPage's single-entry-point back-pop, landing on /receipts is
+    // a deliberate destination here, not "wherever we came from" — but it
+    // must still be a *replace*, not a plain push: a push would leave this
+    // now-submitted Add screen in the back stack, so the next back tap from
+    // /receipts would land right back on a stale add form instead of
+    // wherever the user was before opening Add.
+    navigate('/receipts', { replace: true })
   }
 
   function reset() {
