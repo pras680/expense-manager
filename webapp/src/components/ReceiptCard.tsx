@@ -156,13 +156,27 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
 
   return (
     <div className="relative overflow-hidden rounded-xl">
+      {/* Soft tint + saturated icon/label, matching every other status
+          indicator in this app (Private, Merged, Check, category badges) —
+          a solid bg-red-600/bg-green-600 fill with white text read as much
+          louder than everything else on the card and competed with the
+          amount for attention once revealed. The color still communicates
+          delete-vs-approve at a glance; it just isn't fighting the numbers
+          for the eye anymore. */}
       <div className="absolute inset-y-0 left-0" style={{ width: ACTION_WIDTH }}>
         <button
           type="button"
           onClick={() => setConfirmingDelete(true)}
-          className="flex h-full w-full items-center justify-center bg-red-600 text-sm font-semibold text-white"
+          className="flex h-full w-full flex-col items-center justify-center gap-1 bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
         >
-          Delete
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 6h18" />
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+          </svg>
+          <span className="text-xs font-semibold">Delete</span>
         </button>
       </div>
       {unreviewed && (
@@ -171,9 +185,18 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
             type="button"
             onClick={handleApprove}
             disabled={approving}
-            className="flex h-full w-full items-center justify-center bg-green-600 text-sm font-semibold text-white disabled:opacity-70"
+            className="flex h-full w-full flex-col items-center justify-center gap-1 bg-green-50 text-green-700 disabled:opacity-70 dark:bg-green-950/40 dark:text-green-300"
           >
-            {approving ? '…' : 'Approve'}
+            {approving ? (
+              <span className="text-xs font-semibold">…</span>
+            ) : (
+              <>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+                <span className="text-xs font-semibold">Approve</span>
+              </>
+            )}
           </button>
         </div>
       )}
