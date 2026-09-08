@@ -35,7 +35,7 @@ const ACTION_WIDTH = 88
 const OPEN_THRESHOLD = ACTION_WIDTH / 2
 const TAP_SLOP = 8
 
-export function ReceiptCard({ receipt }: { receipt: Receipt }) {
+export function ReceiptCard({ receipt, showSwipeHint }: { receipt: Receipt; showSwipeHint?: boolean }) {
   const total = reportingTotal(receipt)
   const currency = reportingCurrency(receipt)
   const { nameFor } = useSettings()
@@ -156,27 +156,20 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
 
   return (
     <div className="relative overflow-hidden rounded-xl">
-      {/* Soft tint + saturated icon/label, matching every other status
-          indicator in this app (Private, Merged, Check, category badges) —
-          a solid bg-red-600/bg-green-600 fill with white text read as much
-          louder than everything else on the card and competed with the
-          amount for attention once revealed. The color still communicates
-          delete-vs-approve at a glance; it just isn't fighting the numbers
-          for the eye anymore. */}
+      {/* Plain neutral panel, text label only — no color, no icon. The
+          softened red/green tint from the previous pass was still visibly
+          "behind" the amount once revealed and still read as competing for
+          attention; the direction the user just dragged already tells them
+          which action this is, so the label alone is enough once it's
+          open — color isn't carrying any information a screen-reader-only
+          decision needs. */}
       <div className="absolute inset-y-0 left-0" style={{ width: ACTION_WIDTH }}>
         <button
           type="button"
           onClick={() => setConfirmingDelete(true)}
-          className="flex h-full w-full flex-col items-center justify-center gap-1 bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+          className="flex h-full w-full items-center justify-center bg-neutral-100 text-sm font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 6h18" />
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-          </svg>
-          <span className="text-xs font-semibold">Delete</span>
+          Delete
         </button>
       </div>
       {unreviewed && (
@@ -185,18 +178,9 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
             type="button"
             onClick={handleApprove}
             disabled={approving}
-            className="flex h-full w-full flex-col items-center justify-center gap-1 bg-green-50 text-green-700 disabled:opacity-70 dark:bg-green-950/40 dark:text-green-300"
+            className="flex h-full w-full items-center justify-center bg-neutral-100 text-sm font-medium text-neutral-700 disabled:opacity-70 dark:bg-neutral-800 dark:text-neutral-300"
           >
-            {approving ? (
-              <span className="text-xs font-semibold">…</span>
-            ) : (
-              <>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-                <span className="text-xs font-semibold">Approve</span>
-              </>
-            )}
+            {approving ? '…' : 'Approve'}
           </button>
         </div>
       )}
@@ -219,6 +203,20 @@ export function ReceiptCard({ receipt }: { receipt: Receipt }) {
             : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900'
         }`}
       >
+        {/* One-time, one-card hint that these rows are swipeable at all —
+            shown only on the first receipt in the list, not repeated on
+            every card. A plain flex sibling (not an absolute overlay), so
+            it just pushes the merchant column over by its own width rather
+            than sitting on top of anything — there's no position at which
+            it could overlap the amount or any text. */}
+        {showSwipeHint && (
+          <div className="shrink-0 text-neutral-300 dark:text-neutral-600" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 7l-5 5 5 5" />
+              <path d="M16 7l5 5-5 5" />
+            </svg>
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium text-neutral-900 dark:text-neutral-50">
             {receipt.merchant || 'Unknown merchant'}

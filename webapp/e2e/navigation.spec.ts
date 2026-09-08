@@ -117,6 +117,15 @@ test.describe('receipt edit', () => {
     // category column never actually changed. A hard reload here forces a
     // fresh fetch from the DB rather than any client-side state, which is
     // exactly what "not persistent on the DB" describes.
+    //
+    // Targets "Din Tai Fung" specifically rather than the first receipt in
+    // the list: receipts-data.spec.ts runs concurrently against this same
+    // seeded account and asserts specific categories on the fixtures that
+    // usually sort first (FairPrice Finest -> Groceries, both directly and
+    // via the Reports category breakdown) — briefly swapping one of those
+    // to "Travel" here raced that file's Reports test into reading the
+    // in-flight value. Din Tai Fung's category isn't asserted anywhere else.
+    await page.getByPlaceholder('Search merchant, item, amount, card…').fill('Din Tai Fung')
     const firstReceipt = page.locator('a[href^="/receipts/"][href$="/edit"]').first()
     await firstReceipt.waitFor()
     await firstReceipt.click()

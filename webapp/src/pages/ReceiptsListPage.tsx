@@ -206,8 +206,8 @@ export function ReceiptsListPage() {
         </div>
       ) : (
         <div className="mt-3 flex flex-col gap-2 pb-6">
-          {filtered.map((r) => (
-            <ReceiptCard key={r.id} receipt={r} />
+          {filtered.map((r, i) => (
+            <ReceiptCard key={r.id} receipt={r} showSwipeHint={i === 0} />
           ))}
         </div>
       )}
