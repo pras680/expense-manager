@@ -351,7 +351,12 @@ async function markRow(
   headers: RestHeaders,
   status: 'processed' | 'skipped' | 'failed',
   errorMessage: string | null,
-  receiptId: string | null
+  receiptId: string | null,
+  // Set only to exempt this attempt from the retry budget (a 429 says
+  // nothing about whether the message was a real receipt — see scan-gmail's
+  // identical carve-out). Pass the row's pre-claim retry_count to undo the
+  // +1 claimRow already applied, so the next tick retries for free.
+  retryCountOverride?: number
 ) {
   await fetch(`${SUPABASE_URL}/rest/v1/sms_inbox?id=eq.${id}`, {
     method: 'PATCH',
@@ -360,9 +365,52 @@ async function markRow(
       status,
       error_message: errorMessage,
       receipt_id: receiptId,
-      processed_at: new Date().toISOString()
+      processed_at: new Date().toISOString(),
+      ...(retryCountOverride !== undefined ? { retry_count: retryCountOverride } : {})
     })
   })
+}
+
+// Shared by processRow and processReversal: resolves the last-4/bank pair
+// parse-receipt returned into a normalized last-4 plus a household-scoped
+// bank lookup (last_digits is only unique per household).
+async function resolveCardInfo(
+  parsed: Record<string, unknown>,
+  owner: OwnerContext,
+  headers: RestHeaders
+): Promise<{ cardLast4: string | null; cardBank: string | null }> {
+  let cardLast4: string | null = typeof parsed.card_last4 === 'string' && parsed.card_last4
+    ? parsed.card_last4
+    : (typeof parsed.extracted_digits === 'string' ? parsed.extracted_digits : null)
+  let cardBank: string | null = typeof parsed.card_bank === 'string' && parsed.card_bank ? parsed.card_bank : null
+
+  if (cardLast4) {
+    const normalizedLast4 = cardLast4.replace(/[^0-9]/g, '').slice(-4)
+    if (normalizedLast4.length === 4) {
+      cardLast4 = normalizedLast4
+      try {
+        const householdFilter = owner.householdId
+          ? `&household_id=eq.${owner.householdId}`
+          : '&household_id=is.null'
+        const pmResp = await fetch(
+          `${SUPABASE_URL}/rest/v1/payment_methods?select=id,last_digits,bank_name,card_name&last_digits=eq.${normalizedLast4}${householdFilter}`,
+          { headers }
+        )
+        if (pmResp.ok) {
+          const pmRows = await pmResp.json()
+          cardBank = pmRows?.[0]?.bank_name ?? cardBank ?? 'Unknown Bank'
+        } else if (!cardBank) {
+          cardBank = 'Unknown Bank'
+        }
+      } catch (_err) {
+        if (!cardBank) cardBank = 'Unknown Bank'
+      }
+    } else {
+      cardLast4 = null
+    }
+  }
+
+  return { cardLast4, cardBank }
 }
 
 async function processRow(
@@ -409,6 +457,10 @@ async function processRow(
     })
     if (!parseResp.ok) {
       const errBody = await parseResp.text()
+      if (parseResp.status === 429) {
+        await markRow(row.id, headers, 'failed', 'Parse rate limited — will retry automatically on the next scan.', null, row.retry_count)
+        return 'failed'
+      }
       throw new Error(`parse-receipt HTTP ${parseResp.status}: ${errBody.slice(0, 200)}`)
     }
     parsed = await parseResp.json()
@@ -433,39 +485,7 @@ async function processRow(
   const parsedDate = new Date(rawDate)
   const normalizedDate = Number.isNaN(parsedDate.getTime()) ? row.received_at : parsedDate.toISOString()
 
-  let cardLast4: string | null = typeof parsed.card_last4 === 'string' && parsed.card_last4
-    ? parsed.card_last4
-    : (typeof parsed.extracted_digits === 'string' ? parsed.extracted_digits : null)
-  let cardBank: string | null = typeof parsed.card_bank === 'string' && parsed.card_bank ? parsed.card_bank : null
-
-  if (cardLast4) {
-    const normalizedLast4 = cardLast4.replace(/[^0-9]/g, '').slice(-4)
-    if (normalizedLast4.length === 4) {
-      cardLast4 = normalizedLast4
-      try {
-        // Scoped to the owner's household: last_digits is only unique per
-        // household now, so an unscoped lookup could return another family's
-        // card and stamp the wrong bank on this receipt.
-        const householdFilter = owner.householdId
-          ? `&household_id=eq.${owner.householdId}`
-          : '&household_id=is.null'
-        const pmResp = await fetch(
-          `${SUPABASE_URL}/rest/v1/payment_methods?select=id,last_digits,bank_name,card_name&last_digits=eq.${normalizedLast4}${householdFilter}`,
-          { headers }
-        )
-        if (pmResp.ok) {
-          const pmRows = await pmResp.json()
-          cardBank = pmRows?.[0]?.bank_name ?? cardBank ?? 'Unknown Bank'
-        } else if (!cardBank) {
-          cardBank = 'Unknown Bank'
-        }
-      } catch (_err) {
-        if (!cardBank) cardBank = 'Unknown Bank'
-      }
-    } else {
-      cardLast4 = null
-    }
-  }
+  const { cardLast4, cardBank } = await resolveCardInfo(parsed, owner, headers)
 
   const { rate, converted } = await convertCurrency(totalRaw, receiptCurrency, defaultCurrency, normalizedDate)
 
@@ -631,6 +651,16 @@ async function processReversal(
   headers: RestHeaders,
   owner: OwnerContext
 ): Promise<'processed' | 'skipped' | 'failed'> {
+  // Same learned-correction/custom-category hints processRow sends — a
+  // reversal SMS is parsed by the same LLM and is just as prone to the same
+  // per-merchant mistakes (e.g. "CDG ENGIE" misread as Utilities), but until
+  // now only the charge side ever got the benefit of a correction learned
+  // from editing a receipt.
+  const [learningHints, householdCategories] = await Promise.all([
+    fetchCorrectionHints(owner.householdId, smsText, headers),
+    fetchHouseholdCategories(owner.householdId, headers)
+  ])
+
   let parsed: Record<string, unknown>
   try {
     const parseResp = await fetch(`${SUPABASE_URL}/functions/v1/parse-receipt`, {
@@ -640,10 +670,19 @@ async function processReversal(
       // own arrival time is a far better anchor for inferring it than the
       // parser's own clock, which has no idea when this particular message
       // was actually sent.
-      body: JSON.stringify({ raw_text: `SMS Expense Alert:\n${smsText}`, reference_date: row.received_at })
+      body: JSON.stringify({
+        raw_text: `SMS Expense Alert:\n${smsText}`,
+        reference_date: row.received_at,
+        learning_hints: learningHints,
+        household_categories: householdCategories
+      })
     })
     if (!parseResp.ok) {
       const errBody = await parseResp.text()
+      if (parseResp.status === 429) {
+        await markRow(row.id, headers, 'failed', 'Reversal parse rate limited — will retry automatically on the next scan.', null, row.retry_count)
+        return 'failed'
+      }
       throw new Error(`parse-receipt HTTP ${parseResp.status}: ${errBody.slice(0, 200)}`)
     }
     parsed = await parseResp.json()
@@ -665,6 +704,7 @@ async function processReversal(
   const normalizedDate = Number.isNaN(parsedDate.getTime()) ? row.received_at : parsedDate.toISOString()
 
   const { converted } = await convertCurrency(totalRaw, receiptCurrency, owner.defaultCurrency, normalizedDate)
+  const { cardLast4, cardBank } = await resolveCardInfo(parsed, owner, headers)
 
   // Candidates: this owner's own positive-total receipts around the reversal's
   // amount that haven't already been reversed. reversal_of_receipt_id=is.null
@@ -686,9 +726,20 @@ async function processReversal(
   }
 
   const needle = merchant.toLowerCase()
+  const cardKey = cardBank && cardLast4 ? `${cardBank.toLowerCase()}|${cardLast4}` : null
   const match = candidates.find((r) => {
     const other = (r.merchant ?? '').toLowerCase()
-    return other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))
+    if (other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))) return true
+    // Same fallback as the regular duplicate detector (see CLAUDE.md "Duplicate
+    // detection and merging"): merchant text disagrees between a charge SMS and
+    // its reversal SMS more often than expected (the reversal side sometimes
+    // gives the bank's own descriptor instead of the merchant name), so a
+    // matching card + exact calendar date is an independently strong signal
+    // even when merchant text shares nothing.
+    if (cardKey && r.card_bank && r.card_last4 && r.date === normalizedDate) {
+      return `${r.card_bank.toLowerCase()}|${r.card_last4}` === cardKey
+    }
+    return false
   })
 
   if (!match) {

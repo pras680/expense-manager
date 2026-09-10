@@ -69,6 +69,16 @@ test.describe('settings sub-navigation', () => {
     await expect(page).toHaveURL('/settings')
   })
 
+  test('SMS processing log link navigates and back-navigates', async ({ page }) => {
+    await page.getByRole('link', { name: 'Manage SMS tokens →' }).click()
+    await expect(page).toHaveURL('/settings/sms')
+    await page.getByRole('link', { name: 'View processing log →' }).click()
+    await expect(page).toHaveURL('/settings/sms/log')
+    await expect(page.getByRole('heading', { name: 'SMS processing log' })).toBeVisible()
+    await page.goBack()
+    await expect(page).toHaveURL('/settings/sms')
+  })
+
   test('Categories setup link navigates', async ({ page }) => {
     await page.getByRole('link', { name: 'Manage categories →' }).click()
     await expect(page).toHaveURL('/settings/categories')

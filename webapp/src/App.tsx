@@ -20,6 +20,7 @@ import { SmsSetupPage } from './pages/SmsSetupPage'
 import { CategoriesSetupPage } from './pages/CategoriesSetupPage'
 import { GmailSetupPage } from './pages/GmailSetupPage'
 import { GmailScanLogPage } from './pages/GmailScanLogPage'
+import { SmsScanLogPage } from './pages/SmsScanLogPage'
 import { useSwipeBack } from './hooks/useSwipeBack'
 
 /** Renders nothing; exists so the gesture hook sits inside the router. */
@@ -77,6 +78,7 @@ function AuthGate() {
               <Route path="/reports/monthly/:month" element={<ReportsMonthDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/settings/sms" element={<SmsSetupPage />} />
+              <Route path="/settings/sms/log" element={<SmsScanLogPage />} />
               <Route path="/settings/categories" element={<CategoriesSetupPage />} />
               <Route path="/settings/gmail" element={<GmailSetupPage />} />
               {/* Google redirects here after consent; same component reads ?code= */}

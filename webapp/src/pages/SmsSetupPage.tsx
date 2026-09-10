@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
 import { env } from '../lib/env'
 import {
@@ -89,6 +90,13 @@ export function SmsSetupPage() {
         Your own token tells the server that a forwarded bank alert is <em>yours</em>, so the
         receipt lands under your name and uses your currency.
       </p>
+
+      <Link
+        to="/settings/sms/log"
+        className="mt-2 block text-sm text-accent-700 dark:text-accent-400"
+      >
+        View processing log →
+      </Link>
 
       {error && (
         <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">

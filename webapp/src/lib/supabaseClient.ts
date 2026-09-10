@@ -936,3 +936,67 @@ export async function retryGmailScanLogEntry(id: string): Promise<void> {
   })
   await throwIfNotOk(resp, 'Retry failed')
 }
+
+// ---------------------------------------------------------------------------
+// SMS processing log — unlike Gmail there's no separate log table: sms_inbox
+// itself already records what happened to every message (status +
+// error_message + retry_count), so this just surfaces the skipped/failed
+// rows. RLS scopes this to the caller's own rows
+// (multiuser-16-sms-inbox-rls-and-cleanup.sql) — earlier this table was
+// readable across every household, a gap this UI made worth closing first.
+// ---------------------------------------------------------------------------
+
+export interface SmsInboxLogEntry {
+  id: string
+  body: string
+  sender: string | null
+  receivedAt: string
+  status: 'skipped' | 'failed'
+  reason: string | null
+  /** How many genuine (non-rate-limit) attempts this message has used. */
+  retryCount: number
+}
+
+export async function getSmsInboxLog(limit = 50): Promise<SmsInboxLogEntry[]> {
+  const resp = await authorizedFetch(
+    `${REST_URL}/sms_inbox?select=id,body,sender,received_at,status,error_message,retry_count` +
+    `&status=in.(skipped,failed)&order=received_at.desc&limit=${limit}`
+  )
+  if (!resp.ok) return []
+  const rows = await resp.json()
+  if (!Array.isArray(rows)) return []
+  return rows
+    .filter((row: { status?: string }) => row.status === 'skipped' || row.status === 'failed')
+    .map((row) => ({
+      id: row.id,
+      body: row.body ?? '',
+      sender: row.sender ?? null,
+      receivedAt: row.received_at,
+      status: row.status,
+      reason: row.error_message ?? null,
+      retryCount: typeof row.retry_count === 'number' ? row.retry_count : 0
+    }))
+}
+
+export async function clearSmsInboxLog(): Promise<void> {
+  const resp = await authorizedFetch(`${REST_URL}/sms_inbox?status=in.(skipped,failed)`, {
+    method: 'DELETE',
+    headers: { Prefer: 'return=minimal' }
+  })
+  await throwIfNotOk(resp, 'Clear SMS log failed')
+}
+
+/**
+ * Gives one message a fresh retry budget. sms_inbox IS the processing queue
+ * itself (unlike gmail_scan_log, a separate table) — resetting the row back
+ * to pending, rather than deleting it, is what makes process-sms-inbox pick
+ * it up again on the next tick without losing its body_hash identity.
+ */
+export async function retrySmsInboxEntry(id: string): Promise<void> {
+  const resp = await authorizedFetch(`${REST_URL}/sms_inbox?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'pending', retry_count: 0, error_message: null })
+  })
+  await throwIfNotOk(resp, 'Retry failed')
+}
