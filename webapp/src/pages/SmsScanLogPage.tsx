@@ -5,6 +5,7 @@ import {
   getSmsInboxLog,
   clearSmsInboxLog,
   retrySmsInboxEntry,
+  retryAllSmsInboxEntries,
   type SmsInboxLogEntry
 } from '../lib/supabaseClient'
 
@@ -30,6 +31,7 @@ export function SmsScanLogPage() {
   const [clearing, setClearing] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [retryingId, setRetryingId] = useState<string | null>(null)
+  const [retryingAll, setRetryingAll] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -55,6 +57,19 @@ export function SmsScanLogPage() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setRetryingId(null)
+    }
+  }
+
+  async function handleRetryAll() {
+    setRetryingAll(true)
+    setError(null)
+    try {
+      await retryAllSmsInboxEntries()
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRetryingAll(false)
     }
   }
 
@@ -92,6 +107,16 @@ export function SmsScanLogPage() {
         Successfully imported messages aren't listed here; only the ones worth a
         second look, like a reversal that couldn't find its original charge.
       </p>
+
+      {entries.length > 1 && (
+        <button
+          onClick={handleRetryAll}
+          disabled={retryingAll}
+          className="mt-3 w-full rounded-lg bg-accent-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {retryingAll ? 'Retrying all…' : `Retry all (${entries.length})`}
+        </button>
+      )}
 
       {error && (
         <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">

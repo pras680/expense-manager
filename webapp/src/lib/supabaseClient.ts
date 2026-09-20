@@ -1000,3 +1000,17 @@ export async function retrySmsInboxEntry(id: string): Promise<void> {
   })
   await throwIfNotOk(resp, 'Retry failed')
 }
+
+/**
+ * Same reset as retrySmsInboxEntry, applied to every failed/skipped row at
+ * once — for the case where a whole outage window's worth of messages (e.g.
+ * an LLM provider outage) needs re-queuing in one shot, not one tap each.
+ */
+export async function retryAllSmsInboxEntries(): Promise<void> {
+  const resp = await authorizedFetch(`${REST_URL}/sms_inbox?status=in.(skipped,failed)`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'pending', retry_count: 0, error_message: null })
+  })
+  await throwIfNotOk(resp, 'Retry all failed')
+}
