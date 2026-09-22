@@ -487,6 +487,16 @@ async function processRow(
 
   const { cardLast4, cardBank } = await resolveCardInfo(parsed, owner, headers)
 
+  // The keyword gate above (isReversalTransaction) already routes most
+  // reversals to processReversal before any LLM call, but it's a fixed cue
+  // list and can miss a phrasing it doesn't recognize. parse-receipt's own
+  // judgment (is_reversal) is a second, semantic check on the same message —
+  // when it disagrees with the keyword gate, trust it: treating a refund as
+  // a fresh positive charge would double-count it instead of netting out.
+  if (parsed.is_reversal === true) {
+    return insertReversalOutcome(row, headers, owner, smsText, merchant, totalRaw, receiptCurrency, normalizedDate, category, cardLast4, cardBank)
+  }
+
   const { rate, converted } = await convertCurrency(totalRaw, receiptCurrency, defaultCurrency, normalizedDate)
 
   // Duplicate guard, scoped to the household and qualified by merchant.
@@ -699,12 +709,37 @@ async function processReversal(
   }
 
   const receiptCurrency = typeof parsed.currency === 'string' && parsed.currency ? parsed.currency : owner.defaultCurrency
+  const category = typeof parsed.category === 'string' && parsed.category ? parsed.category : 'Miscellaneous'
   const rawDate = (typeof parsed.date === 'string' && parsed.date) ? parsed.date : row.received_at
   const parsedDate = new Date(rawDate)
   const normalizedDate = Number.isNaN(parsedDate.getTime()) ? row.received_at : parsedDate.toISOString()
 
-  const { converted } = await convertCurrency(totalRaw, receiptCurrency, owner.defaultCurrency, normalizedDate)
   const { cardLast4, cardBank } = await resolveCardInfo(parsed, owner, headers)
+
+  return insertReversalOutcome(row, headers, owner, smsText, merchant, totalRaw, receiptCurrency, normalizedDate, category, cardLast4, cardBank)
+}
+
+// Shared by processReversal (keyword-gated) and processRow's is_reversal
+// cross-check: finds a positive-total original to offset, tied together via
+// reversal_of_receipt_id, or — when nothing matches — still records the
+// reversal as its own standalone negative receipt. A skip here used to leave
+// the net amount silently wrong (the original charge stays un-offset)
+// whenever the original was never captured (e.g. lost in an outage, or aged
+// past the 30-day lookback), which is exactly the case worth getting right.
+async function insertReversalOutcome(
+  row: SMSInboxRow,
+  headers: RestHeaders,
+  owner: OwnerContext,
+  smsText: string,
+  merchant: string,
+  totalRaw: number,
+  receiptCurrency: string,
+  normalizedDate: string,
+  category: string,
+  cardLast4: string | null,
+  cardBank: string | null
+): Promise<'processed' | 'skipped' | 'failed'> {
+  const { converted } = await convertCurrency(totalRaw, receiptCurrency, owner.defaultCurrency, normalizedDate)
 
   // Candidates: this owner's own positive-total receipts around the reversal's
   // amount that haven't already been reversed. reversal_of_receipt_id=is.null
@@ -722,7 +757,7 @@ async function processReversal(
     )
     if (candResp.ok) candidates = await candResp.json()
   } catch (_err) {
-    // Fall through — no candidates means we skip below rather than fail.
+    // Fall through — no candidates means the standalone-negative branch below.
   }
 
   const needle = merchant.toLowerCase()
@@ -742,26 +777,41 @@ async function processReversal(
     return false
   })
 
-  if (!match) {
-    await markRow(row.id, headers, 'skipped', 'Reversal — no matching original charge found', null)
-    return 'skipped'
-  }
-
-  const offsetBody = {
+  // Matched: negate the ORIGINAL's own stored values so the two rows net to
+  // exactly zero regardless of any rounding drift in this message's own parse.
+  // Unmatched: fall back to this message's own parsed fields — a negative
+  // receipt with no reversal_of_receipt_id link is still correct in every
+  // total/report; it just isn't tied to a specific charge.
+  const offsetBody = match ? {
     merchant: match.merchant ?? merchant,
     date: normalizedDate,
     total: -match.total,
     currency: match.currency ?? owner.defaultCurrency,
     file_url: null,
-    category: match.category ?? 'Miscellaneous',
-    card_last4: match.card_last4,
-    card_bank: match.card_bank,
+    category: match.category ?? category,
+    card_last4: match.card_last4 ?? cardLast4,
+    card_bank: match.card_bank ?? cardBank,
     user_id: owner.userId,
     household_id: owner.householdId,
     visibility: 'household',
     source: 'sms',
     reversal_of_receipt_id: match.id,
     raw_ocr_json: { raw_text: smsText, reversal_of_receipt_id: match.id, line_items: [] }
+  } : {
+    merchant,
+    date: normalizedDate,
+    total: -converted,
+    currency: owner.defaultCurrency,
+    file_url: null,
+    category,
+    card_last4: cardLast4,
+    card_bank: cardBank,
+    user_id: owner.userId,
+    household_id: owner.householdId,
+    visibility: 'household',
+    source: 'sms',
+    reversal_of_receipt_id: null,
+    raw_ocr_json: { raw_text: smsText, line_items: [] }
   }
 
   try {
