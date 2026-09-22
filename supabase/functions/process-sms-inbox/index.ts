@@ -473,7 +473,7 @@ async function processRow(
 
   const merchant = typeof parsed.merchant === 'string' ? parsed.merchant.trim() : ''
   const totalRaw = typeof parsed.total === 'number' ? parsed.total : Number(parsed.total)
-  if (!merchant || !Number.isFinite(totalRaw) || totalRaw <= 0) {
+  if (!merchant || !Number.isFinite(totalRaw) || totalRaw === 0) {
     await markRow(row.id, headers, 'skipped', 'Missing amount or merchant', null)
     return 'skipped'
   }
@@ -490,11 +490,15 @@ async function processRow(
   // The keyword gate above (isReversalTransaction) already routes most
   // reversals to processReversal before any LLM call, but it's a fixed cue
   // list and can miss a phrasing it doesn't recognize. parse-receipt's own
-  // judgment (is_reversal) is a second, semantic check on the same message —
-  // when it disagrees with the keyword gate, trust it: treating a refund as
-  // a fresh positive charge would double-count it instead of netting out.
-  if (parsed.is_reversal === true) {
-    return insertReversalOutcome(row, headers, owner, smsText, merchant, totalRaw, receiptCurrency, normalizedDate, category, cardLast4, cardBank)
+  // judgment is a second, semantic check on the same message, expressed as a
+  // negative total (per its prompt) rather than a separate flag — a
+  // dedicated is_reversal boolean was tried and dropped: the model reliably
+  // encoded direction as the sign of total even when explicitly told not
+  // to, so the prompt now asks for exactly that instead of fighting it. When
+  // this disagrees with the keyword gate, trust it: treating a refund as a
+  // fresh positive charge would double-count it instead of netting out.
+  if (totalRaw < 0) {
+    return insertReversalOutcome(row, headers, owner, smsText, merchant, Math.abs(totalRaw), receiptCurrency, normalizedDate, category, cardLast4, cardBank)
   }
 
   const { rate, converted } = await convertCurrency(totalRaw, receiptCurrency, defaultCurrency, normalizedDate)
@@ -703,7 +707,7 @@ async function processReversal(
 
   const merchant = typeof parsed.merchant === 'string' ? parsed.merchant.trim() : ''
   const totalRaw = typeof parsed.total === 'number' ? parsed.total : Number(parsed.total)
-  if (!merchant || !Number.isFinite(totalRaw) || totalRaw <= 0) {
+  if (!merchant || !Number.isFinite(totalRaw) || totalRaw === 0) {
     await markRow(row.id, headers, 'skipped', 'Reversal — missing amount or merchant', null)
     return 'skipped'
   }
@@ -716,7 +720,11 @@ async function processReversal(
 
   const { cardLast4, cardBank } = await resolveCardInfo(parsed, owner, headers)
 
-  return insertReversalOutcome(row, headers, owner, smsText, merchant, totalRaw, receiptCurrency, normalizedDate, category, cardLast4, cardBank)
+  // We already know this is a reversal (isReversalTransaction gated the call
+  // into this function) — take the magnitude regardless of which sign the
+  // model chose, rather than depending on it having followed the
+  // negative-for-reversal convention correctly on this particular message.
+  return insertReversalOutcome(row, headers, owner, smsText, merchant, Math.abs(totalRaw), receiptCurrency, normalizedDate, category, cardLast4, cardBank)
 }
 
 // Shared by processReversal (keyword-gated) and processRow's is_reversal
