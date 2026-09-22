@@ -105,7 +105,7 @@ export function SmsScanLogPage() {
       <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
         Messages the importer received but didn't turn into a receipt — with why.
         Successfully imported messages aren't listed here; only the ones worth a
-        second look, like a reversal that couldn't find its original charge.
+        second look, like a message the parser couldn't make sense of.
       </p>
 
       {entries.length > 1 && (

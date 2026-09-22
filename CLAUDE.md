@@ -186,13 +186,27 @@ All three converge on the same `receipts` table and the same shape.
   backlog just drains over more ticks).
 - Parsing logic ported from the iOS app's `InvoiceParser`: `TRANSACTION_CUES`
   gate whether a message is even a transaction, `NON_EXPENSE_CUES` reject
-  OTPs/balance-enquiry noise, `REVERSAL_CUES` route to reversal handling
-  instead of a new receipt.
-- **Reversals don't create a new receipt.** A matching prior receipt (same
-  owner, amount, recent date, not already reversed) gets
-  `reversal_of_receipt_id` set on a *new negative-total* row referencing it —
-  both the charge and its reversal stay visible, and the original can't be
-  offset twice.
+  OTPs/balance-enquiry noise, `REVERSAL_CUES` route to reversal handling.
+  `parse-receipt` itself is also asked to signal direction — `total` comes
+  back negative for a refund/reversal/chargeback, positive otherwise — and
+  `processRow` cross-checks `total < 0` against the keyword gate, so a
+  reversal worded in a way `REVERSAL_CUES` doesn't recognize still routes
+  correctly instead of being booked as a fresh (double-counted) charge. A
+  dedicated `is_reversal` boolean field was tried first and dropped: the
+  model reliably encoded direction as the sign of `total` even when told
+  explicitly not to, so the prompt now asks for exactly that instead of
+  fighting it.
+- **Each reversal SMS is recorded as its own standalone negative receipt —
+  deliberately not matched against a specific prior charge.** That matching
+  (same owner/amount/recent-date, optionally card+exact-date) existed once
+  and was removed: a household can have more than one charge of the same
+  amount in a short window, the "original" charge may never have made it
+  into `receipts` at all (a parse outage, a duplicate-guard skip, aged past
+  a lookback window), and a wrong match silently offsets the wrong receipt
+  instead of the right one. `reversal_of_receipt_id` is always left `null`
+  on the SMS path now — a reversal is a complete fact on its own (money was
+  credited back, this amount, this date), so total spend nets out correctly
+  without needing to identify which earlier row it's supposed to cancel.
 - `sms_inbox` itself accepts and queues messages unattended — no gate before
   a row is picked up for processing (`isnt ios directly inserting sms text
   as it is` was an explicit decision). The **resulting receipt**, though,

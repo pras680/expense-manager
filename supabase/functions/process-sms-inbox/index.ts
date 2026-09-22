@@ -642,23 +642,17 @@ async function processRow(
   }
 }
 
-type OriginalReceipt = {
-  id: string
-  merchant: string | null
-  total: number
-  currency: string | null
-  card_last4: string | null
-  card_bank: string | null
-  category: string | null
-  date: string
-}
-
-// A reversal SMS doesn't create its own receipt — it cancels one that (should
-// have) already been created from the original charge SMS. Rather than mutate
-// that original row, this inserts a second, negative receipt that exactly
-// negates it (reversal_of_receipt_id ties the two together and stops the same
-// original being offset twice), so both the charge and its reversal stay
-// visible in history while totals net to zero.
+// Each reversal SMS is recorded as its own standalone negative receipt — it
+// is NOT matched against a prior charge of the same amount. That matching
+// used to exist (same owner/amount/recent-date, optionally card+exact-date)
+// but was fragile: a household can have more than one charge of the same
+// amount in a short window, the "original" charge may never have made it
+// into receipts at all (a parse outage, a duplicate-guard skip, aged past
+// the lookback window), and a wrong match silently offsets the wrong
+// receipt instead of the right one. A reversal is a complete fact on its
+// own — money was credited back on this date for this amount — so treating
+// it as its own independent transaction is both simpler and more correct
+// than guessing which earlier row it's supposed to cancel.
 async function processReversal(
   row: SMSInboxRow,
   smsText: string,
@@ -727,13 +721,9 @@ async function processReversal(
   return insertReversalOutcome(row, headers, owner, smsText, merchant, Math.abs(totalRaw), receiptCurrency, normalizedDate, category, cardLast4, cardBank)
 }
 
-// Shared by processReversal (keyword-gated) and processRow's is_reversal
-// cross-check: finds a positive-total original to offset, tied together via
-// reversal_of_receipt_id, or — when nothing matches — still records the
-// reversal as its own standalone negative receipt. A skip here used to leave
-// the net amount silently wrong (the original charge stays un-offset)
-// whenever the original was never captured (e.g. lost in an outage, or aged
-// past the 30-day lookback), which is exactly the case worth getting right.
+// Shared by processReversal (keyword-gated) and processRow's negative-total
+// cross-check: always inserts the reversal as its own negative receipt, with
+// no lookup against existing receipts and no reversal_of_receipt_id link.
 async function insertReversalOutcome(
   row: SMSInboxRow,
   headers: RestHeaders,
@@ -749,63 +739,7 @@ async function insertReversalOutcome(
 ): Promise<'processed' | 'skipped' | 'failed'> {
   const { converted } = await convertCurrency(totalRaw, receiptCurrency, owner.defaultCurrency, normalizedDate)
 
-  // Candidates: this owner's own positive-total receipts around the reversal's
-  // amount that haven't already been reversed. reversal_of_receipt_id=is.null
-  // excludes offset entries themselves (their total is negative anyway).
-  let candidates: OriginalReceipt[] = []
-  try {
-    const scope = owner.householdId ? `household_id=eq.${owner.householdId}` : `user_id=eq.${owner.userId}`
-    const from = new Date(new Date(normalizedDate).getTime() - 30 * 24 * 60 * 60 * 1000).toISOString()
-    const candResp = await fetch(
-      `${SUPABASE_URL}/rest/v1/receipts?select=id,merchant,total,currency,card_last4,card_bank,category,date&${scope}` +
-      `&total=gte.${(converted - 0.01).toFixed(2)}&total=lte.${(converted + 0.01).toFixed(2)}` +
-      `&reversal_of_receipt_id=is.null&date=gte.${from}&date=lte.${normalizedDate}` +
-      `&order=date.desc&limit=10`,
-      { headers }
-    )
-    if (candResp.ok) candidates = await candResp.json()
-  } catch (_err) {
-    // Fall through — no candidates means the standalone-negative branch below.
-  }
-
-  const needle = merchant.toLowerCase()
-  const cardKey = cardBank && cardLast4 ? `${cardBank.toLowerCase()}|${cardLast4}` : null
-  const match = candidates.find((r) => {
-    const other = (r.merchant ?? '').toLowerCase()
-    if (other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))) return true
-    // Same fallback as the regular duplicate detector (see CLAUDE.md "Duplicate
-    // detection and merging"): merchant text disagrees between a charge SMS and
-    // its reversal SMS more often than expected (the reversal side sometimes
-    // gives the bank's own descriptor instead of the merchant name), so a
-    // matching card + exact calendar date is an independently strong signal
-    // even when merchant text shares nothing.
-    if (cardKey && r.card_bank && r.card_last4 && r.date === normalizedDate) {
-      return `${r.card_bank.toLowerCase()}|${r.card_last4}` === cardKey
-    }
-    return false
-  })
-
-  // Matched: negate the ORIGINAL's own stored values so the two rows net to
-  // exactly zero regardless of any rounding drift in this message's own parse.
-  // Unmatched: fall back to this message's own parsed fields — a negative
-  // receipt with no reversal_of_receipt_id link is still correct in every
-  // total/report; it just isn't tied to a specific charge.
-  const offsetBody = match ? {
-    merchant: match.merchant ?? merchant,
-    date: normalizedDate,
-    total: -match.total,
-    currency: match.currency ?? owner.defaultCurrency,
-    file_url: null,
-    category: match.category ?? category,
-    card_last4: match.card_last4 ?? cardLast4,
-    card_bank: match.card_bank ?? cardBank,
-    user_id: owner.userId,
-    household_id: owner.householdId,
-    visibility: 'household',
-    source: 'sms',
-    reversal_of_receipt_id: match.id,
-    raw_ocr_json: { raw_text: smsText, reversal_of_receipt_id: match.id, line_items: [] }
-  } : {
+  const insertBody = {
     merchant,
     date: normalizedDate,
     total: -converted,
@@ -826,7 +760,7 @@ async function insertReversalOutcome(
     const insertResp = await fetch(`${SUPABASE_URL}/rest/v1/receipts`, {
       method: 'POST',
       headers: { ...headers, Prefer: 'return=representation' },
-      body: JSON.stringify(offsetBody)
+      body: JSON.stringify(insertBody)
     })
     if (!insertResp.ok) {
       const errBody = await insertResp.text()
