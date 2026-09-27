@@ -297,6 +297,21 @@ All three converge on the same `receipts` table and the same shape.
   "the provider's own response got cut off mid-JSON by its token budget"
   apart from "couldn't reach the provider at all" — each has a different
   fix and used to be one indistinguishable bucket.
+- **Quota visibility.** Groq has no "remaining quota" endpoint; the only
+  source is the `x-ratelimit-*` headers (and `retry-after` on a 429) on each
+  chat-completions response. After every upstream call — from any caller,
+  including both crons — `parse-receipt` upserts them into
+  `llm_quota_status` (`multiuser-20-llm-quota-status.sql`, one row per
+  provider, readable by any signed-in user, written only via the service
+  role) using `EdgeRuntime.waitUntil`, so it adds no latency. It writes only
+  headers actually present (PostgREST merge-duplicates updates just the
+  payload's columns), so a response missing some doesn't blank the rest. A
+  429 response also carries `retry_after_seconds`. The Add Receipt screen
+  reads this table (`useParserStatus`/`ParserStatusCard`) to show requests
+  left today, tokens left this minute, and a cooldown countdown; the
+  snapshot is only as fresh as the last parse, so a window whose reset time
+  has passed is displayed as refilled. The quota is deployment-wide — the SMS
+  and Gmail crons draw on the same key.
 - Also returns `derivation_note` — one short sentence explaining how it
   arrived at the values (which line it read a field from, or what it
   inferred something from and why). Comes from the same call, no extra

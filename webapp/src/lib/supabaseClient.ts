@@ -388,24 +388,98 @@ export async function deleteReceipt(id: string): Promise<void> {
 // Receipt parsing (Edge Function)
 // ---------------------------------------------------------------------------
 
-export async function parseReceiptText(rawText: string): Promise<ParsedReceipt> {
+/**
+ * The parser's LLM provider is rate limited or out of quota (HTTP 429 from
+ * parse-receipt). Distinct from a generic failure so the UI can say "wait N
+ * seconds" instead of "something broke" — nothing is wrong with the receipt.
+ */
+export class ParserRateLimitedError extends Error {
+  retryAfterSeconds: number | null
+
+  constructor(retryAfterSeconds: number | null) {
+    super(
+      retryAfterSeconds != null
+        ? `The receipt reader is at its limit — try again in ${retryAfterSeconds}s.`
+        : 'The receipt reader is at its limit — try again shortly.'
+    )
+    this.name = 'ParserRateLimitedError'
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
+async function callParseReceipt(body: Record<string, unknown>, failurePrefix: string): Promise<ParsedReceipt> {
   const resp = await authorizedFetch(`${FUNCTIONS_URL}/parse-receipt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw_text: rawText })
+    body: JSON.stringify(body)
   })
-  await throwIfNotOk(resp, 'Parse receipt failed')
+  if (resp.status === 429) {
+    let retryAfter: number | null = null
+    try {
+      const parsed = await resp.json()
+      if (typeof parsed?.retry_after_seconds === 'number') retryAfter = parsed.retry_after_seconds
+    } catch { /* body isn't JSON — fall back to the header */ }
+    if (retryAfter == null) {
+      const header = Number.parseFloat(resp.headers.get('Retry-After') ?? '')
+      if (Number.isFinite(header)) retryAfter = Math.ceil(header)
+    }
+    throw new ParserRateLimitedError(retryAfter)
+  }
+  await throwIfNotOk(resp, failurePrefix)
   return resp.json()
 }
 
-export async function parseReceiptImage(imageBase64: string, imageMimeType: string): Promise<ParsedReceipt> {
-  const resp = await authorizedFetch(`${FUNCTIONS_URL}/parse-receipt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image_base64: imageBase64, image_mime_type: imageMimeType })
-  })
-  await throwIfNotOk(resp, 'Parse receipt image failed')
-  return resp.json()
+export function parseReceiptText(rawText: string): Promise<ParsedReceipt> {
+  return callParseReceipt({ raw_text: rawText }, 'Parse receipt failed')
+}
+
+export function parseReceiptImage(imageBase64: string, imageMimeType: string): Promise<ParsedReceipt> {
+  return callParseReceipt({ image_base64: imageBase64, image_mime_type: imageMimeType }, 'Parse receipt image failed')
+}
+
+/**
+ * Last-known rate-limit state of the parser's LLM key, as recorded by
+ * parse-receipt from the provider's response headers on its most recent call
+ * from any caller (multiuser-20-llm-quota-status.sql). Deployment-wide, not
+ * per user — the SMS and Gmail crons draw on the same quota.
+ */
+export interface LlmQuotaStatus {
+  model: string | null
+  limitRequests: number | null
+  remainingRequests: number | null
+  requestsResetAt: string | null
+  limitTokens: number | null
+  remainingTokens: number | null
+  tokensResetAt: string | null
+  rateLimitedUntil: string | null
+  lastStatus: number | null
+  updatedAt: string
+}
+
+/** Null when nothing has been recorded yet or the table isn't deployed — callers treat that as "unknown", never as an error. */
+export async function getLlmQuotaStatus(): Promise<LlmQuotaStatus | null> {
+  try {
+    const resp = await authorizedFetch(`${REST_URL}/llm_quota_status?provider=eq.groq&select=*`)
+    if (!resp.ok) return null
+    const rows = await resp.json()
+    const r = Array.isArray(rows) ? rows[0] : null
+    if (!r) return null
+    return {
+      model: r.model ?? null,
+      limitRequests: r.limit_requests ?? null,
+      remainingRequests: r.remaining_requests ?? null,
+      requestsResetAt: r.requests_reset_at ?? null,
+      limitTokens: r.limit_tokens ?? null,
+      remainingTokens: r.remaining_tokens ?? null,
+      tokensResetAt: r.tokens_reset_at ?? null,
+      rateLimitedUntil: r.rate_limited_until ?? null,
+      lastStatus: r.last_status ?? null,
+      updatedAt: r.updated_at
+    }
+  } catch (err) {
+    if (err instanceof AuthRequiredError) throw err
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,26 @@
   --color-accent-800: #dd2b0f;
   --color-accent-900: #a82309;
   --color-accent-950: #5c1305;
+
+  /* Add Receipt screen motion. Always applied through `motion-safe:` so
+     reduced-motion users get the same layout with no movement. */
+  --animate-rise: rise 0.4s ease-out both;
+  --animate-scan: scan 1.8s ease-in-out infinite alternate;
+  --animate-bob: bob 2.4s ease-in-out infinite;
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: none; }
+  }
+  /* A sweep line over the receipt preview while the parser reads it. */
+  @keyframes scan {
+    from { top: 0%; }
+    to { top: calc(100% - 3px); }
+  }
+  @keyframes bob {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
 }
 
 :root {

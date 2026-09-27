@@ -14,6 +14,11 @@ const LLM_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const LLM_API_KEY = Deno.env.get('LLM_API_KEY')
 const LLM_MODEL = Deno.env.get('LLM_MODEL') ?? 'qwen/qwen3.6-27b'
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+
+// Supabase's edge runtime global — lets a promise finish after the response
+// has been sent. Absent when running outside that runtime (e.g. plain Deno).
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined
 
 // Supabase's verify_jwt gate accepts the public anon key, which ships inside the
 // iOS binary and the web app's JS bundle — so by default this function is an
@@ -158,6 +163,12 @@ serve(async (req) => {
       body: JSON.stringify(chatBody)
     })
 
+    // Groq has no quota endpoint; its rate-limit headers on this response are
+    // the only source. Recorded for every caller so the webapp can show
+    // what's left — see multiuser-20-llm-quota-status.sql.
+    const retryAfterSeconds = parseRetryAfter(resp.headers.get('retry-after'))
+    recordQuotaStatus(resp, retryAfterSeconds)
+
     if (!resp.ok) {
       // Upstream bodies can carry provider/account/model details and quota state
       // — log them server-side, but never echo them back to the caller.
@@ -167,7 +178,11 @@ serve(async (req) => {
       // "you are rate limited / out of quota" (429) and a real fault, which is
       // otherwise indistinguishable from outside the function's logs.
       if (resp.status === 429) {
-        return jsonResponse({ error: 'Receipt parser is rate limited or out of quota', upstream_status: 429 }, 429)
+        return jsonResponse(
+          { error: 'Receipt parser is rate limited or out of quota', upstream_status: 429, retry_after_seconds: retryAfterSeconds },
+          429,
+          retryAfterSeconds != null ? { 'Retry-After': String(retryAfterSeconds) } : {}
+        )
       }
       // 413 is the input+requested-output combination exceeding the model's
       // context limit, rejected upfront rather than truncated — distinct from
@@ -297,6 +312,81 @@ function safeHintString(value: unknown) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 80)
+}
+
+// Best-effort: a failure here must never affect the parse result, and it
+// runs after the response is sent where the runtime allows, so it adds no
+// latency. Only headers that are actually present are written — PostgREST's
+// merge-duplicates upsert updates just the columns in the payload, so a
+// response missing some headers doesn't blank out the last known values.
+function recordQuotaStatus(resp: Response, retryAfterSeconds: number | null) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return
+
+  const now = Date.now()
+  const row: Record<string, unknown> = {
+    provider: 'groq',
+    model: LLM_MODEL,
+    last_status: resp.status,
+    updated_at: new Date(now).toISOString()
+  }
+  const setInt = (column: string, header: string) => {
+    const value = Number.parseInt(resp.headers.get(header) ?? '', 10)
+    if (Number.isFinite(value)) row[column] = value
+  }
+  const setResetAt = (column: string, header: string) => {
+    const ms = parseGroqDuration(resp.headers.get(header))
+    if (ms != null) row[column] = new Date(now + ms).toISOString()
+  }
+  setInt('limit_requests', 'x-ratelimit-limit-requests')
+  setInt('remaining_requests', 'x-ratelimit-remaining-requests')
+  setResetAt('requests_reset_at', 'x-ratelimit-reset-requests')
+  setInt('limit_tokens', 'x-ratelimit-limit-tokens')
+  setInt('remaining_tokens', 'x-ratelimit-remaining-tokens')
+  setResetAt('tokens_reset_at', 'x-ratelimit-reset-tokens')
+  if (resp.status === 429) {
+    // No retry-after on a 429 still means "limited" — assume a short wait
+    // rather than showing the parser as ready.
+    row.rate_limited_until = new Date(now + (retryAfterSeconds ?? 60) * 1000).toISOString()
+  } else if (resp.ok) {
+    row.rate_limited_until = null
+  }
+
+  const write = fetch(`${SUPABASE_URL}/rest/v1/llm_quota_status`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal'
+    },
+    body: JSON.stringify(row)
+  })
+    .then(async (r) => {
+      if (!r.ok) console.error(`Recording LLM quota status failed: ${r.status} ${(await r.text()).slice(0, 200)}`)
+    })
+    .catch((err) => console.error(`Recording LLM quota status failed: ${err instanceof Error ? err.name : err}`))
+
+  if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(write)
+}
+
+// Groq reports resets as Go-style durations: "2m59.56s", "7.66s", "860ms",
+// "1h2m3s". Returns milliseconds, or null if absent/unrecognised.
+function parseGroqDuration(value: string | null): number | null {
+  if (!value) return null
+  let total = 0
+  let matched = false
+  for (const [, amount, unit] of value.matchAll(/(\d+(?:\.\d+)?)(ms|h|m|s)/g)) {
+    matched = true
+    const n = Number.parseFloat(amount)
+    total += unit === 'h' ? n * 3_600_000 : unit === 'm' ? n * 60_000 : unit === 's' ? n * 1000 : n
+  }
+  return matched ? Math.round(total) : null
+}
+
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null
+  const seconds = Number.parseFloat(value)
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null
 }
 
 function jsonResponse(body: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
