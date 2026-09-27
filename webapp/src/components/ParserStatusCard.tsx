@@ -28,7 +28,7 @@ function Meter({ label, unit, meter }: { label: string; unit: string; meter: Quo
         <div className={`h-full transition-[width] duration-700 ease-out ${barColor}`} style={{ width: `${pct}%` }} />
       </div>
       <div className="mt-1 text-[11px] text-neutral-500 tabular-nums dark:text-neutral-400">
-        {meter.resetInMs != null ? `refills in ${formatDuration(meter.resetInMs)}` : 'full'}
+        {meter.resetInMs != null ? `full again in ${formatDuration(meter.resetInMs)}` : 'full'}
       </div>
     </div>
   )
@@ -80,8 +80,8 @@ export function ParserStatusCard({ view, now }: { view: ParserView; now: number 
 
       {(view.requests || view.tokens) && (
         <div className="mt-3 flex gap-5">
-          {view.requests && <Meter label="Requests today" unit="left" meter={view.requests} />}
-          {view.tokens && <Meter label="Tokens this minute" unit="left" meter={view.tokens} />}
+          {view.requests && <Meter label="Requests · per day" unit="left" meter={view.requests} />}
+          {view.tokens && <Meter label="Tokens · per minute" unit="left" meter={view.tokens} />}
         </div>
       )}
     </section>

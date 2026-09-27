@@ -396,6 +396,21 @@ A candidate is flagged a duplicate if, within the same scope:
      disagrees across sources more often than expected, and a matching card
      on the same calendar day is an independently strong signal on its own.
 
+"Same date" in the card rule means the same **UTC calendar day**, compared
+via a `utcDay()` helper in each of the three copies — never by comparing the
+raw date strings. It used to be `r.date === normalizedDate`, which never
+matched anything: PostgREST returns `2026-09-27T00:00:00+00:00` where
+`toISOString()` gives `2026-09-27T00:00:00.000Z`, so the card rule was dead
+code in all three paths until that was fixed.
+
+When several rows match, the merging paths (`scan-gmail`,
+`insertOrMergeReceipt`) prefer an **unreviewed** one, then the closest in
+time — two thin copies of one charge can coexist (e.g. two SMS alerts), and
+the copy still waiting for review is the one a richer source should
+complete. A webapp merge is announced on the receipts list (a notice with a
+link to the merged receipt, passed via router state), since the new data
+lands on an existing row and would otherwise be invisible.
+
 Currency is not separately compared — `total` here is always the *converted*
 total in the owner's `default_currency`.
 

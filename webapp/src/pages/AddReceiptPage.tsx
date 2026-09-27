@@ -375,7 +375,7 @@ export function AddReceiptPage() {
     // Silently folds into an existing sms/gmail-sourced receipt for the same
     // charge when one exists, rather than creating a second record — see
     // insertOrMergeReceipt.
-    await insertOrMergeReceipt(input)
+    const result = await insertOrMergeReceipt(input)
     await refresh()
     // The Add tab can be reached from any of the other three tabs, so unlike
     // EditReceiptPage's single-entry-point back-pop, landing on /receipts is
@@ -384,7 +384,13 @@ export function AddReceiptPage() {
     // now-submitted Add screen in the back stack, so the next back tap from
     // /receipts would land right back on a stale add form instead of
     // wherever the user was before opening Add.
-    navigate('/receipts', { replace: true })
+    //
+    // A merge is otherwise invisible — the new data lands on an existing
+    // receipt instead of a new row — so the list is told which one to point at.
+    navigate('/receipts', {
+      replace: true,
+      state: result.merged ? { mergedInto: { id: result.id, merchant: result.mergedIntoMerchant ?? null } } : null
+    })
   }
 
   function reset() {

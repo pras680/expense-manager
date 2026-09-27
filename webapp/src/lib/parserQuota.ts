@@ -1,9 +1,16 @@
 import type { LlmQuotaStatus } from './supabaseClient'
 
 // Turns the last-recorded provider headers (getLlmQuotaStatus) into what the
-// Add Receipt screen shows. The snapshot is only as fresh as the last parse
-// from any caller — so a window whose reset time has already passed is shown
-// as refilled, not as the stale "remaining" figure from before the reset.
+// Add Receipt screen shows.
+//
+// Groq's limits are rolling buckets that refill continuously, not windows that
+// reset all at once: its x-ratelimit-reset-* header is the time until the
+// bucket is *full again* at a steady rate (one request back every
+// 86400s / 1000 = 86.4s on a 1000/day limit; 8000 tokens a minute refill at
+// ~133/s). The snapshot is only as fresh as the last parse from any caller,
+// so the current level is interpolated linearly from that snapshot towards
+// full at its reset time — rather than showing a stale figure, or snapping
+// straight to full.
 
 export type ParserState = 'unknown' | 'ready' | 'low' | 'limited'
 
@@ -28,13 +35,24 @@ export interface ParserView {
 // per-minute token limit.
 const LOW_TOKENS = 6000
 
-function meter(remaining: number | null, limit: number | null, resetAt: string | null, now: number): QuotaMeter | null {
+function meter(
+  remaining: number | null,
+  limit: number | null,
+  resetAt: string | null,
+  recordedAt: number,
+  now: number
+): QuotaMeter | null {
   if (remaining == null || limit == null || limit <= 0) return null
   const resetMs = resetAt ? new Date(resetAt).getTime() : NaN
-  if (Number.isFinite(resetMs) && resetMs <= now) {
-    return { remaining: limit, limit, resetInMs: null }
+  if (!Number.isFinite(resetMs)) return { remaining, limit, resetInMs: null }
+  if (resetMs <= now || remaining >= limit) return { remaining: limit, limit, resetInMs: null }
+  const span = resetMs - recordedAt
+  const progress = span > 0 ? Math.min(1, Math.max(0, (now - recordedAt) / span)) : 0
+  return {
+    remaining: Math.min(limit, Math.floor(remaining + (limit - remaining) * progress)),
+    limit,
+    resetInMs: resetMs - now
   }
-  return { remaining, limit, resetInMs: Number.isFinite(resetMs) ? resetMs - now : null }
 }
 
 export function deriveParserView(status: LlmQuotaStatus | null, now: number): ParserView {
@@ -42,9 +60,10 @@ export function deriveParserView(status: LlmQuotaStatus | null, now: number): Pa
     return { state: 'unknown', secondsUntilReady: null, requests: null, tokens: null, updatedAt: null }
   }
 
-  const requests = meter(status.remainingRequests, status.limitRequests, status.requestsResetAt, now)
-  const tokens = meter(status.remainingTokens, status.limitTokens, status.tokensResetAt, now)
   const updatedAt = new Date(status.updatedAt)
+  const recordedAt = Number.isFinite(updatedAt.getTime()) ? updatedAt.getTime() : now
+  const requests = meter(status.remainingRequests, status.limitRequests, status.requestsResetAt, recordedAt, now)
+  const tokens = meter(status.remainingTokens, status.limitTokens, status.tokensResetAt, recordedAt, now)
 
   const limitedUntil = status.rateLimitedUntil ? new Date(status.rateLimitedUntil).getTime() : NaN
   if (Number.isFinite(limitedUntil) && limitedUntil > now) {

@@ -250,11 +250,20 @@ interface DuplicateCandidateRow {
 // guard in process-sms-inbox/scan-gmail. Those two run as service_role and
 // filter by household by hand; here RLS already scopes the select to the
 // caller's own + household rows, so no explicit filter is needed.
+// Calendar day (UTC, same basis every pipeline normalizes dates to) of a
+// stored or incoming date. The card rule below used to compare raw strings,
+// which never matched: PostgREST returns '2026-09-27T00:00:00+00:00' while
+// toISOString() gives '2026-09-27T00:00:00.000Z' — same instant, different text.
+function utcDay(value: string | null | undefined): string | null {
+  const t = new Date(value ?? '')
+  return Number.isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10)
+}
+
 async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<DuplicateCandidateRow | null> {
   const incomingRichness = SOURCE_RICHNESS[input.source ?? 'manual'] ?? 2
   const d = new Date(input.date)
   if (Number.isNaN(d.getTime())) return null
-  const normalizedDate = d.toISOString()
+  const incomingDay = utcDay(input.date)
   const from = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString()
   const to = new Date(d.getTime() + 24 * 60 * 60 * 1000).toISOString()
 
@@ -269,7 +278,7 @@ async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<Duplicat
 
   const needle = input.merchant.trim().toLowerCase()
   const cardKey = input.cardBank && input.cardLast4 ? `${input.cardBank.toLowerCase()}|${input.cardLast4}` : null
-  const match = (rows as DuplicateCandidateRow[]).find((r) => {
+  const matches = (rows as DuplicateCandidateRow[]).filter((r) => {
     // Only worth merging into a strictly less-rich existing source — an
     // equal-or-richer one is either a genuinely separate purchase or already
     // the best copy of this data, so it's left alone (a plain duplicate, same
@@ -281,12 +290,19 @@ async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<Duplicat
     // Same reasoning as the edge functions' guard: merchant text disagrees
     // across sources more often than expected, but the same card charged on
     // the same calendar date is an independently strong signal on its own.
-    if (cardKey && r.card_bank && r.card_last4 && r.date === normalizedDate) {
+    if (cardKey && r.card_bank && r.card_last4 && utcDay(r.date) === incomingDay) {
       return `${r.card_bank.toLowerCase()}|${r.card_last4}` === cardKey
     }
     return false
   })
-  return match ?? null
+  // More than one thinner copy of the same charge can exist (e.g. two SMS
+  // alerts for one purchase). Prefer the one still waiting for review — that's
+  // the copy this save is meant to complete — then the closest in time.
+  const distance = (r: DuplicateCandidateRow) => Math.abs(new Date(r.date ?? '').getTime() - d.getTime()) || 0
+  matches.sort((a, b) =>
+    Number(a.reviewed_at !== null) - Number(b.reviewed_at !== null) || distance(a) - distance(b)
+  )
+  return matches[0] ?? null
 }
 
 function mergeRawOcrJson(existingRaw: Record<string, unknown>, input: ReceiptWriteInput): Record<string, unknown> {
@@ -325,10 +341,11 @@ async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptW
     if (!existing.file_url && input.fileUrl) body.file_url = input.fileUrl
     const resp = await authorizedFetch(`${REST_URL}/receipts?id=eq.${existing.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
       body: JSON.stringify(body)
     })
     await throwIfNotOk(resp, 'Merge receipt failed')
+    await throwIfNoRowsUpdated(resp)
     return
   }
 
@@ -348,6 +365,16 @@ async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptW
     }
   }
   await throwIfNotOk(resp, 'Merge receipt failed')
+  await throwIfNoRowsUpdated(resp)
+}
+
+// PostgREST reports a row RLS refused to update as 200 with an empty array —
+// without this, a refused merge looks exactly like a successful one.
+async function throwIfNoRowsUpdated(resp: Response) {
+  const rows = await resp.json()
+  if (Array.isArray(rows) && rows.length === 0) {
+    throw new Error("Couldn't merge into the matching receipt — it belongs to someone you can't edit.")
+  }
 }
 
 /**
@@ -357,7 +384,9 @@ async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptW
  * block a legitimate save, same fail-open convention as the two server-side
  * pipelines' own guards.
  */
-export async function insertOrMergeReceipt(input: ReceiptWriteInput): Promise<{ id: string; merged: boolean }> {
+export async function insertOrMergeReceipt(
+  input: ReceiptWriteInput
+): Promise<{ id: string; merged: boolean; mergedIntoMerchant?: string | null }> {
   let duplicate: DuplicateCandidateRow | null = null
   try {
     duplicate = await findDuplicateForMerge(input)
@@ -366,7 +395,7 @@ export async function insertOrMergeReceipt(input: ReceiptWriteInput): Promise<{ 
   }
   if (duplicate) {
     await mergeIntoReceipt(duplicate, input)
-    return { id: duplicate.id, merged: true }
+    return { id: duplicate.id, merged: true, mergedIntoMerchant: duplicate.merchant }
   }
   const id = await insertReceipt(input)
   return { id, merged: false }

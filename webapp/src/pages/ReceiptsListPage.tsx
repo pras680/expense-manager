@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useReceipts } from '../hooks/useReceipts'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
@@ -33,6 +33,12 @@ export function ReceiptsListPage() {
   // lands here already filtered instead of requiring a second tap.
   const [onlyUnreviewed, setOnlyUnreviewed] = useState(() => searchParams.get('filter') === 'pending')
   const [clearing, setClearing] = useState(false)
+  const [onlyMerged, setOnlyMerged] = useState(false)
+  // Set by AddReceiptPage when a save folded into an existing receipt rather
+  // than creating a new one — otherwise that merge is invisible.
+  const location = useLocation()
+  const mergedInto = (location.state as { mergedInto?: { id: string; merchant: string | null } } | null)?.mergedInto ?? null
+  const [mergeNoticeDismissed, setMergeNoticeDismissed] = useState(false)
 
   const unreviewed = useMemo(() => receipts.filter(needsReview), [receipts])
   // Receipts the duplicate guard folded a second source into (e.g. an email
@@ -57,6 +63,7 @@ export function ReceiptsListPage() {
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
     return receipts.filter((r) => {
       if (onlyUnreviewed && !needsReview(r)) return false
+      if (onlyMerged && !hasMergedSources(r)) return false
       if (ownerFilter === 'mine' && r.userId !== session?.userId) return false
       if (filter === 'last30') {
         if (!r.date) return false
@@ -67,7 +74,7 @@ export function ReceiptsListPage() {
       }
       return receiptMatches(r, query)
     })
-  }, [receipts, filter, query, ownerFilter, session?.userId, onlyUnreviewed])
+  }, [receipts, filter, query, ownerFilter, session?.userId, onlyUnreviewed, onlyMerged])
 
   const totalSpend = useMemo(
     () => filtered.filter(isExpenseReceipt).reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
@@ -108,7 +115,7 @@ export function ReceiptsListPage() {
           </p>
           <div className="mt-2 flex gap-2">
             <button
-              onClick={() => setOnlyUnreviewed((v) => !v)}
+              onClick={() => { setOnlyUnreviewed((v) => !v); setOnlyMerged(false) }}
               className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white"
             >
               {onlyUnreviewed ? 'Show all' : 'Review them'}
@@ -124,14 +131,45 @@ export function ReceiptsListPage() {
         </div>
       )}
 
+      {mergedInto && !mergeNoticeDismissed && (
+        <div className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-700/60 dark:bg-emerald-950/30">
+          <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
+            🔗 Saved into your existing {mergedInto.merchant ? `“${mergedInto.merchant}” ` : ''}receipt
+          </p>
+          <p className="mt-0.5 text-xs text-emerald-800 dark:text-emerald-300/80">
+            It matched a receipt already imported from SMS or email for the same charge, so the details were combined instead of creating a duplicate.
+          </p>
+          <div className="mt-2 flex gap-2">
+            <Link
+              to={`/receipts/${mergedInto.id}/edit`}
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              View it
+            </Link>
+            <button
+              onClick={() => setMergeNoticeDismissed(true)}
+              className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-emerald-900 dark:bg-neutral-900 dark:text-emerald-200"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {merged.length > 0 && (
         <div className="mt-3 rounded-xl border border-accent-300 bg-accent-50 p-3 dark:border-accent-700/60 dark:bg-accent-950/30">
           <p className="text-sm font-medium text-accent-900 dark:text-accent-200">
             🔗 {merged.length} receipt{merged.length === 1 ? '' : 's'} merged from multiple sources
           </p>
           <p className="mt-0.5 text-xs text-accent-800 dark:text-accent-300/80">
-            A later SMS, email, or photo for the same charge was combined into the original receipt instead of creating a duplicate. Look for the "Merged" tag below.
+            A later SMS, email, or photo for the same charge was combined into the original receipt instead of creating a duplicate.
           </p>
+          <button
+            onClick={() => { setOnlyMerged((v) => !v); setOnlyUnreviewed(false) }}
+            className="mt-2 rounded-lg bg-accent-700 px-3 py-1.5 text-sm font-medium text-white"
+          >
+            {onlyMerged ? 'Show all' : 'Show them'}
+          </button>
         </div>
       )}
 

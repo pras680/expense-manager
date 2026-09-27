@@ -663,7 +663,7 @@ async function processMessage(
       const dupRows = await dupResp.json()
       const needle = merchant.toLowerCase()
       const cardKey = cardBank && cardLast4 ? `${cardBank.toLowerCase()}|${cardLast4}` : null
-      const matchRow = Array.isArray(dupRows) && dupRows.find((r: DupCandidateRow) => {
+      const candidates = Array.isArray(dupRows) ? (dupRows as DupCandidateRow[]).filter((r: DupCandidateRow) => {
         const other = (r.merchant ?? '').toLowerCase()
         if (other === needle || (other !== '' && (other.includes(needle) || needle.includes(other)))) return true
         // Merchant text disagrees between sources more often than it should — e.g. an
@@ -671,11 +671,18 @@ async function processMessage(
         // the bank instead ("UOB"), for the same charge. Same card + same amount + same
         // calendar date is an independent signal strong enough to catch that case even
         // when merchant text shares nothing.
-        if (cardKey && r.card_bank && r.card_last4 && r.date === normalizedDate) {
+        if (cardKey && r.card_bank && r.card_last4 && utcDay(r.date) === utcDay(normalizedDate)) {
           return `${r.card_bank.toLowerCase()}|${r.card_last4}` === cardKey
         }
         return false
-      })
+      }) : []
+      // Two thinner copies of one charge can exist (e.g. two SMS alerts) —
+      // prefer the one still waiting for review, then the closest in time.
+      const distance = (r: DupCandidateRow) => Math.abs(new Date(r.date ?? '').getTime() - d.getTime()) || 0
+      candidates.sort((a, b) =>
+        Number(a.reviewed_at != null) - Number(b.reviewed_at != null) || distance(a) - distance(b)
+      )
+      const matchRow = candidates[0]
       if (matchRow) {
         // An SMS alert is the least informative of the three sources — terse,
         // no line items, often names the bank instead of the merchant. Rather
@@ -941,4 +948,12 @@ async function recordError(userId: string, message: string, headers: RestHeaders
 
 function json(body: unknown, status = 200, extra: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, ...extra } })
+}
+
+// Calendar day (UTC) of a stored or incoming date. The card+same-day duplicate
+// rule used to compare raw strings, which never matched: PostgREST returns
+// '2026-09-27T00:00:00+00:00' where toISOString() gives '...T00:00:00.000Z'.
+function utcDay(value: string | null | undefined): string | null {
+  const t = new Date(value ?? '')
+  return Number.isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10)
 }
