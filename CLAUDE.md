@@ -261,8 +261,9 @@ All three converge on the same `receipts` table and the same shape.
   tick, because a rate limit says nothing about whether the email is a real
   receipt. Once a message is retry-exhausted it's silently skipped forever
   on every future scan (no new log row) — if a code fix might now let it
-  succeed, its `gmail_scan_log` row has to be deleted manually to get it
-  reconsidered, and only helps if the message is still inside the current
+  succeed, its `gmail_scan_log` row has to be deleted to get it
+  reconsidered — the Retry button on Settings → Gmail import → Log
+  (`retryGmailScanLogEntry`) does exactly that — and only helps if the message is still inside the current
   `since` window (`last_scan_at - 1 day`, or `DEFAULT_LOOKBACK_DAYS = 7` if
   never scanned) — messages that have aged out need to be re-forwarded, not
   just unblocked.
@@ -284,10 +285,13 @@ All three converge on the same `receipts` table and the same shape.
 - Accepts either `raw_text` or `image_base64` (`image_mime_type` must be one
   of `image/jpeg`, `image/png`, `image/webp`; `MAX_IMAGE_BASE64_CHARS =
   8_000_000` ≈ 6MB decoded — the client compresses before upload).
-- `REQUIRE_AUTH` is off by default (would otherwise break the iOS app until
-  it has its own sign-in), which means **this function is an open, unmetered
-  proxy to a paid LLM by default** — the anon key ships in both client
-  bundles. Flip `REQUIRE_AUTH=true` once every caller authenticates.
+- `REQUIRE_AUTH` is off by default in code, and while it's off **this
+  function is an open, unmetered proxy to a paid LLM** — the anon key ships
+  in both client bundles. Every caller now sends a real JWT (webapp via
+  `authorizedFetch`, iOS via `applySupabaseHeaders`, which has no anon-key
+  fallback, and the crons via the service role), so it should be set to
+  `true` on every deployed environment
+  (`supabase secrets set REQUIRE_AUTH=true`).
 - Errors carry `upstream_status` and a `truncated` flag distinctly, so a
   caller can tell "the provider rejected this as too large" (413) apart from
   "the provider's own response got cut off mid-JSON by its token budget"
@@ -451,8 +455,14 @@ table (relative to SGD) computes an approximate cross-rate. Always rounds to
 ## Categories
 
 `EXPENSE_CATEGORIES` (`webapp/src/lib/categories.ts`, ported from the iOS
-`Invoice.swift`) is the fixed base list — 17 entries, shared by every
-household, never edited by this feature. Two of them — `'Local Transfer'`
+`Invoice.swift`) is the fixed base list — 18 entries, shared by every
+household, never edited by this feature. `'Travel'` (flights, hotels, car
+rentals, trip bookings) and `'Commute'` (rideshare/taxi, public transit,
+parking/ERP — including a ride to the airport) are deliberately separate;
+`multiuser-17-commute-category.sql` split existing Travel receipts by
+merchant keyword when Commute was introduced. The same split lives in
+`parse-receipt`'s prompt and in iOS's keyword classifier (Commute checked
+before Travel, since first match wins) — keep all three in sync. Two of them — `'Local Transfer'`
 and `'Credit Card Bill Payment'` — are excluded from every spend total/
 average/chart via `isExpenseCategory()`, because they represent money moving
 between accounts, not money spent; they're still kept as receipts for
@@ -461,9 +471,15 @@ record-keeping, and `'Local Transfer'` gets its own detail fields
 
 Households can additionally **add their own categories** (Settings →
 Categories → `CategoriesSetupPage.tsx`), stored in `household_categories`
-(household-scoped, add/delete only — no rename, and the two special
-categories above are never rows in this table, so there's nothing to
-protect from being renamed or deleted). `receipts.category` has no DB check
+(household-scoped, add/rename/delete; the two special categories above are
+never rows in this table, so there's nothing to protect). A rename goes
+through the `rename_household_category` RPC
+(`multiuser-18-rename-household-category.sql`), not a plain update: since
+`receipts.category` is text rather than a foreign key, the household's
+receipts (other members' private ones included) and its correction rules
+have to be moved to the new name in the same call, which ordinary RLS
+wouldn't allow. Clashes with a built-in name are rejected client-side, same
+as on add. `receipts.category` has no DB check
 constraint — it's plain `text`, and Reports/`CategoryBadge` already derive
 categories from whatever's on each receipt rather than a fixed list — so a
 custom category works everywhere a built-in one does with zero extra
@@ -566,11 +582,12 @@ Current secrets per function:
   plain and HTML MIME parts — it silently doubles the payload sent to the
   LLM and was the direct cause of permanent import failures on
   heavily-templated marketing/receipt emails.
-- **Optional receipt columns aren't guaranteed present** on every deployed
-  environment (`receipt_amount`, `receipt_currency`, `conversion_rate`,
-  `converted_total`, `default_currency`) — `insertReceipt` always retries
-  without them on a missing-column error; don't assume they exist when
-  reading receipts either.
+- **Optional receipt columns** (`receipt_amount`, `receipt_currency`,
+  `conversion_rate`, `converted_total`, `default_currency`) weren't created
+  by any numbered migration until `multiuser-19-optional-receipt-columns.sql`
+  — an environment that hasn't run it may still lack them. `insertReceipt`
+  keeps retrying without them on a missing-column error; don't assume they
+  exist when reading receipts either.
 - **Never assume a forwarded/connected mailbox is the user's primary
   inbox** — check `gmail_connections.email` before diagnosing a "missing"
   email as a code bug.

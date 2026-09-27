@@ -753,6 +753,31 @@ export async function deleteHouseholdCategory(id: string): Promise<void> {
   await throwIfNotOk(resp, 'Delete category failed')
 }
 
+/**
+ * Renames a custom category and moves everything filed under the old name
+ * with it — the household's receipts (including other members' private ones)
+ * and its learned correction rules. That cross-member update is why this goes
+ * through an RPC rather than a plain PATCH (multiuser-18-rename-household-category.sql).
+ */
+export async function renameHouseholdCategory(id: string, name: string): Promise<void> {
+  const resp = await authorizedFetch(`${REST_URL}/rpc/rename_household_category`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_id: id, p_new_name: name.trim() })
+  })
+  if (!resp.ok) {
+    // The function raises human-readable messages ("X" already exists) —
+    // show those rather than the raw PostgREST error envelope.
+    const body = await resp.text()
+    let message = body.slice(0, 300)
+    try {
+      const parsed = JSON.parse(body)
+      if (typeof parsed?.message === 'string') message = parsed.message
+    } catch { /* not JSON — keep the raw text */ }
+    throw new Error(`Rename failed: ${message}`)
+  }
+}
+
 /** Clears the "needs review" flag once a member has confirmed the details. */
 export async function markReceiptsReviewed(ids: string[], userId: string): Promise<void> {
   if (ids.length === 0) return

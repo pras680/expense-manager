@@ -60,6 +60,7 @@ extension Invoice {
         "EV Charging",
         "Utilities",
         "Travel",
+        "Commute",
         "Health",
         "Home",
         "Subscriptions",
@@ -296,7 +297,9 @@ struct InvoiceParser {
             ("Clothing", ["clothing", "apparel", "shirt", "pants", "shoes", "nike", "adidas", "uniqlo", "zara", "h&m", "laundry"]),
             ("Entertainment", ["cinema", "movie", "theater", "ticket", "concert", "netflix", "spotify", "game", "gaming", "book", "klook"]),
             ("Utilities", ["utility", "electric", "water", "internet", "phone bill", "singtel", "starhub", "m1", "sp services", "xfinity", "comcast", "verizon", "at&t"]),
-            ("Travel", ["flight", "flight itinerary", "travel itinerary", "itinerary", "e-ticket", "air ticket", "booking confirmation", "boarding", "airport", "airline", "scoot", "singapore airlines", "sq ", "jetstar", "airasia", "emirates", "qatar airways", "hotel", "grab", "gojek", "uber", "lyft", "taxi", "parking", "train", "transit", "mrt", "rental car"]),
+            // Commute is checked before Travel so a ride to the airport ("grab" + "airport") lands in Commute.
+            ("Commute", ["grab", "gojek", "uber", "lyft", "taxi", "comfortdelgro", "cdg zig", "ryde", "parking", "carpark", "train", "transit", "mrt", "simplygo", "ez-link", "ezlink", "transitlink", "bus fare", "erp charge"]),
+            ("Travel", ["flight", "flight itinerary", "travel itinerary", "itinerary", "e-ticket", "air ticket", "booking confirmation", "boarding", "airport", "airline", "scoot", "singapore airlines", "sq ", "jetstar", "airasia", "emirates", "qatar airways", "hotel", "rental car"]),
             ("Health", ["pharmacy", "guardian", "watsons", "cvs", "walgreens", "medical", "doctor", "dental", "clinic", "fitness", "gym"]),
             ("Home", ["home depot", "lowes", "ikea", "hardware", "furniture", "garden", "paint", "tools"]),
             ("Subscriptions", ["subscription", "membership", "monthly", "annual plan", "renewal"]),

@@ -10,6 +10,7 @@ export const EXPENSE_CATEGORIES = [
   'EV Charging',
   'Utilities',
   'Travel',
+  'Commute',
   'Health',
   'Home',
   'Subscriptions',
