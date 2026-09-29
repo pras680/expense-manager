@@ -29,6 +29,11 @@ const FALLBACK_LLM_MODEL = Deno.env.get('FALLBACK_LLM_MODEL')
 const FALLBACK_CONFIGURED = Boolean(FALLBACK_LLM_API_URL && FALLBACK_LLM_API_KEY && FALLBACK_LLM_MODEL)
 
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
+
+// Supabase's edge runtime global — lets a promise finish after the response
+// has been sent. Absent when running outside that runtime (e.g. plain Deno).
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined
 
 // Supabase's verify_jwt gate accepts the public anon key, which ships inside the
 // iOS binary and the web app's JS bundle — so by default this function is an
@@ -118,13 +123,13 @@ serve(async (req) => {
     // on the name itself plus whatever merchant-specific correction hints
     // (above/below) reinforce it — a known, accepted limitation, not a bug.
     const categoryEnum = household_categories.length > 0
-      ? `Groceries, Food & Dining, Electronics, Clothing, Entertainment, Fuel, EV Charging, Utilities, Travel, Health, Home, Subscriptions, Services, Local Transfer, Credit Card Bill Payment, Miscellaneous, ${household_categories.join(', ')}`
-      : 'Groceries, Food & Dining, Electronics, Clothing, Entertainment, Fuel, EV Charging, Utilities, Travel, Health, Home, Subscriptions, Services, Local Transfer, Credit Card Bill Payment, Miscellaneous'
+      ? `Groceries, Food & Dining, Electronics, Clothing, Entertainment, Fuel, EV Charging, Utilities, Travel, Commute, Health, Home, Subscriptions, Services, Local Transfer, Credit Card Bill Payment, ATM Cash Withdrawal, Miscellaneous, ${household_categories.join(', ')}`
+      : 'Groceries, Food & Dining, Electronics, Clothing, Entertainment, Fuel, EV Charging, Utilities, Travel, Commute, Health, Home, Subscriptions, Services, Local Transfer, Credit Card Bill Payment, ATM Cash Withdrawal, Miscellaneous'
     const householdCategoryText = household_categories.length > 0
       ? ` Also use one of these household-specific categories when it fits more precisely than the built-in ones, using the exact spelling given: ${household_categories.join(', ')}.`
       : ''
 
-    const systemPrompt = `First judge whether this text actually describes one specific real purchase, bill, payment, refund, or money transfer with a determinable amount — not a newsletter, marketing or promotional email, a shipping/tracking update with no price, a calendar invite, an account or security notification, a social notification, or general correspondence that merely mentions money in passing. This judgment is content-based, not keyword-based: an email can contain words like "order" or "payment" while still not documenting an actual transaction (e.g. "track your order" with no amount, or a newsletter about payment options), and can document a real transaction without using any typical receipt wording at all. If it does not describe one specific real transaction, respond with merchant: null and total: null, and use null/[] for every other field — do not invent or guess a merchant or amount from unrelated content just because a number appears somewhere in the text. If it does, extract structured receipt data from it. Respond with one valid JSON object only. Keys: merchant, date, total, currency, extracted_digits, card_last4, card_bank, category, line_items, raw_text, derivation_note. Today's reference date is ${referenceDateISO.slice(0, 10)}. date must be yyyy-mm-dd when possible; use the exact year printed on the receipt — never infer or adjust a year that IS printed. When no year is printed at all (common in bank SMS alerts, e.g. "15 Aug 16:55"), use the year from the reference date above, UNLESS that would place the date more than a couple of days in the future relative to the reference date, in which case use the previous year instead — never guess an arbitrary year from general knowledge. When the date is numeric and ambiguous (e.g. 8/7/2026), assume day/month/year order (Singapore convention), i.e. 8/7/2026 means 8 July 2026, not August 7th — only use month/day order if the first number is greater than 12. total must be numeric. Make total NEGATIVE when this transaction is money being credited, refunded, or reversed back onto the card/account instead of spent — a refund, reversal, chargeback, or a cancelled/voided charge being undone. Make total POSITIVE for an ordinary purchase, payment, or transfer — this is the default; only go negative for the refund/reversal case above. currency must be a 3-letter ISO code, default SGD when unclear. extracted_digits and card_last4 must contain only the last 4 digits of the payment card used, such as digits near VISA, MasterCard, AMEX, CARD, CREDIT, DEBIT, ****, xxxx, or similar payment markers; use null if unknown. card_bank should be null unless the receipt explicitly names the issuing bank. Infer category from merchant name, receipt headers, and line item descriptions. category must be exactly one of: ${categoryEnum}. Use Groceries for supermarkets, grocery stores, produce, household grocery items, and wholesale grocery runs. Use Food & Dining for restaurants, cafes, bakeries, delivery, and prepared food. Use Electronics for computers, phones, appliances, accessories, and tech stores. Use Clothing for apparel, shoes, laundry, and fashion stores. Use Entertainment for movies, games, events, books, music, and leisure. Use Fuel for gas/petrol stations and fuel purchases. Use EV Charging for electric vehicle charging sessions or networks. Use Utilities for power, water, internet, phone, and recurring household bills. Use Travel for hotels, rideshare, transit, parking, flights, and car rentals. Use Health for pharmacy, medical, dental, fitness, and personal care. Use Home for hardware, furniture, home improvement, and garden supplies. Use Subscriptions for recurring memberships or digital services. Use Services for service providers such as repair, cleaning, tuition, salon, consultation, handyman, electrician, or maintenance — even when paid via PayNow/PayLah, if the message documents a specific service rendered (a job, a booking, an invoice). Use Local Transfer for PayNow/PayLah/FAST/bank-transfer/fund-transfer alerts that are just money moving to a bank account or person, with no documented goods or service behind it — this is the default for a bare transfer alert, including self-transfers between the user's own accounts and sending money to family or friends. Treat the payee/recipient name as merchant for these. Use Credit Card Bill Payment for bank confirmations that a credit card bill, card account, statement balance, minimum payment, outstanding balance, or amount due was paid.${householdCategoryText} If multiple categories match, choose the category with the largest spend or strongest receipt evidence. Use Miscellaneous only when evidence is unclear. line_items is an array of {description, amount}. raw_text must be a plain-text transcription of ALL text visible on the receipt, in reading order, newlines between lines — this is what makes a receipt findable later by searching for something printed on it, so transcribe it even when the structured fields above already capture the totals. When the input was already text rather than an image, set raw_text to null. derivation_note must be one short plain-language sentence (under 140 characters) explaining how you arrived at merchant/total/category — e.g. which line or field you read them from, or what you inferred them from and why — so a human glancing at it later understands your reasoning at a glance; set it to null whenever merchant and total are both null. Use null for unknown scalar values and [] for unknown line_items.`
+    const systemPrompt = `First judge whether this text actually describes one specific real purchase, bill, payment, refund, or money transfer with a determinable amount — not a newsletter, marketing or promotional email, a shipping/tracking update with no price, a calendar invite, an account or security notification, a social notification, or general correspondence that merely mentions money in passing. This judgment is content-based, not keyword-based: an email can contain words like "order" or "payment" while still not documenting an actual transaction (e.g. "track your order" with no amount, or a newsletter about payment options), and can document a real transaction without using any typical receipt wording at all. If it does not describe one specific real transaction, respond with merchant: null and total: null, and use null/[] for every other field — do not invent or guess a merchant or amount from unrelated content just because a number appears somewhere in the text. If it does, extract structured receipt data from it. Respond with one valid JSON object only. Keys: merchant, date, total, currency, extracted_digits, card_last4, card_bank, category, line_items, raw_text, derivation_note. Today's reference date is ${referenceDateISO.slice(0, 10)}. date must be yyyy-mm-dd when possible; use the exact year printed on the receipt — never infer or adjust a year that IS printed. When no year is printed at all (common in bank SMS alerts, e.g. "15 Aug 16:55"), use the year from the reference date above, UNLESS that would place the date more than a couple of days in the future relative to the reference date, in which case use the previous year instead — never guess an arbitrary year from general knowledge. When the date is numeric and ambiguous (e.g. 8/7/2026), assume day/month/year order (Singapore convention), i.e. 8/7/2026 means 8 July 2026, not August 7th — only use month/day order if the first number is greater than 12. total must be numeric. Make total NEGATIVE when this transaction is money being credited, refunded, or reversed back onto the card/account instead of spent — a refund, reversal, chargeback, or a cancelled/voided charge being undone. Make total POSITIVE for an ordinary purchase, payment, or transfer — this is the default; only go negative for the refund/reversal case above. currency must be a 3-letter ISO code, default SGD when unclear. extracted_digits and card_last4 must contain only the last 4 digits of the payment card used, such as digits near VISA, MasterCard, AMEX, CARD, CREDIT, DEBIT, ****, xxxx, or similar payment markers; use null if unknown. card_bank should be null unless the receipt explicitly names the issuing bank. Infer category from merchant name, receipt headers, and line item descriptions. category must be exactly one of: ${categoryEnum}. Use Groceries for supermarkets, grocery stores, produce, household grocery items, and wholesale grocery runs. Use Food & Dining for restaurants, cafes, bakeries, delivery, and prepared food. Use Electronics for computers, phones, appliances, accessories, and tech stores. Use Clothing for apparel, shoes, laundry, and fashion stores. Use Entertainment for movies, games, events, books, music, and leisure. Use Fuel for gas/petrol stations and fuel purchases. Use EV Charging for electric vehicle charging sessions or networks. Use Utilities for power, water, internet, phone, and recurring household bills. Use Travel for flights, hotels, car rentals, and trip/travel bookings. Use Commute for local getting-around: rideshare and taxis (Grab, Gojek, Uber, TADA, Ryde, CDG/ComfortDelGro/Zig), public transit (MRT, bus, SimplyGo, EZ-Link, TransitLink), and parking/ERP — including a ride to or from the airport. Use Health for pharmacy, medical, dental, fitness, and personal care. Use Home for hardware, furniture, home improvement, and garden supplies. Use Subscriptions for recurring memberships or digital services. Use Services for service providers such as repair, cleaning, tuition, salon, consultation, handyman, electrician, or maintenance — even when paid via PayNow/PayLah, if the message documents a specific service rendered (a job, a booking, an invoice). Use Local Transfer for PayNow/PayLah/FAST/bank-transfer/fund-transfer alerts that are just money moving to a bank account or person, with no documented goods or service behind it — this is the default for a bare transfer alert, including self-transfers between the user's own accounts and sending money to family or friends. Treat the payee/recipient name as merchant for these. Use Credit Card Bill Payment for bank confirmations that a credit card bill, card account, statement balance, minimum payment, outstanding balance, or amount due was paid. Use ATM Cash Withdrawal for ATM or cash withdrawal alerts.${householdCategoryText} If multiple categories match, choose the category with the largest spend or strongest receipt evidence. Use Miscellaneous only when evidence is unclear. line_items is an array of {description, amount}. raw_text must be a plain-text transcription of ALL text visible on the receipt, in reading order, newlines between lines — this is what makes a receipt findable later by searching for something printed on it, so transcribe it even when the structured fields above already capture the totals. When the input was already text rather than an image, set raw_text to null. derivation_note must be one short plain-language sentence (under 140 characters) explaining how you arrived at merchant/total/category — e.g. which line or field you read them from, or what you inferred them from and why — so a human glancing at it later understands your reasoning at a glance; set it to null whenever merchant and total are both null. Use null for unknown scalar values and [] for unknown line_items.`
 
     const correctionHintText = learning_hints.length > 0
       ? `\n\nUSER_CORRECTION_HINTS:\n${JSON.stringify(learning_hints)}\nIf OCR text contains a merchant_keyword, prefer the corrected values for merchant, category, currency, card_last4, and card_bank when applicable, and treat that hint's note (if any) as additional trusted context about this specific merchant when writing derivation_note and choosing category.`
@@ -156,7 +161,15 @@ serve(async (req) => {
       ]
     }
 
-    let result = await callLLMProvider(LLM_API_URL, LLM_API_KEY, LLM_MODEL, basePayload, true)
+    let result = await callLLMProvider(LLM_API_URL, LLM_API_KEY, LLM_MODEL, basePayload, {
+      includeReasoningEffort: true,
+      // Groq has no quota endpoint; its rate-limit headers on this response
+      // are the only source. Recorded for every caller so the webapp can
+      // show what's left — see multiuser-20-llm-quota-status.sql. Only done
+      // for the primary: the headers/row shape here are Groq-specific, and
+      // a fallback provider's own limits aren't what that table tracks.
+      recordGroqQuota: true
+    })
     let triedFallback = false
 
     if (!result.ok && FALLBACK_CONFIGURED) {
@@ -165,7 +178,9 @@ serve(async (req) => {
       // reasoning_effort is a qwen/Groq-specific knob, not a general
       // OpenAI-compatible field — omitted for the fallback since we don't
       // know whether that provider even recognizes it.
-      result = await callLLMProvider(FALLBACK_LLM_API_URL!, FALLBACK_LLM_API_KEY!, FALLBACK_LLM_MODEL!, basePayload, false)
+      result = await callLLMProvider(FALLBACK_LLM_API_URL!, FALLBACK_LLM_API_KEY!, FALLBACK_LLM_MODEL!, basePayload, {
+        includeReasoningEffort: false
+      })
     }
 
     if (!result.ok) {
@@ -174,7 +189,11 @@ serve(async (req) => {
       // "you are rate limited / out of quota" (429) and a real fault, which is
       // otherwise indistinguishable from outside the function's logs.
       if (result.status === 429) {
-        return jsonResponse({ error: 'Receipt parser is rate limited or out of quota', upstream_status: 429 }, 429)
+        return jsonResponse(
+          { error: 'Receipt parser is rate limited or out of quota', upstream_status: 429, retry_after_seconds: result.retryAfterSeconds ?? null },
+          429,
+          result.retryAfterSeconds != null ? { 'Retry-After': String(result.retryAfterSeconds) } : {}
+        )
       }
       // 413 is the input+requested-output combination exceeding the model's
       // context limit, rejected upfront rather than truncated — distinct from
@@ -296,7 +315,13 @@ function safeHintString(value: unknown) {
 
 type LLMResult =
   | { ok: true; data: Record<string, unknown> }
-  | { ok: false; status: number | 'empty' | 'invalid_json'; detail: string; truncated?: boolean }
+  | {
+      ok: false
+      status: number | 'empty' | 'invalid_json'
+      detail: string
+      truncated?: boolean
+      retryAfterSeconds?: number | null
+    }
 
 // One call to one OpenAI-compatible chat-completions endpoint, normalizing
 // every failure mode (transport error, non-2xx, empty content, unparseable
@@ -307,7 +332,7 @@ async function callLLMProvider(
   apiKey: string,
   model: string,
   basePayload: Record<string, unknown>,
-  includeReasoningEffort: boolean
+  options: { includeReasoningEffort: boolean; recordGroqQuota?: boolean }
 ): Promise<LLMResult> {
   const chatBody = {
     ...basePayload,
@@ -317,7 +342,7 @@ async function callLLMProvider(
     // answer — unnecessary latency/cost for a fixed-shape extraction task,
     // so reasoning is turned off. response_format still forces JSON-only
     // content.
-    ...(includeReasoningEffort ? { reasoning_effort: 'none' } : {})
+    ...(options.includeReasoningEffort ? { reasoning_effort: 'none' } : {})
   }
 
   let resp: Response
@@ -334,11 +359,17 @@ async function callLLMProvider(
     return { ok: false, status: 0, detail: `transport error: ${err instanceof Error ? err.message : String(err)}` }
   }
 
+  let retryAfterSeconds: number | null = null
+  if (options.recordGroqQuota) {
+    retryAfterSeconds = parseRetryAfter(resp.headers.get('retry-after'))
+    recordQuotaStatus(resp, retryAfterSeconds)
+  }
+
   if (!resp.ok) {
     // Upstream bodies can carry provider/account/model details and quota state
     // — log them server-side, but never echo them back to the caller.
     const errBody = await resp.text()
-    return { ok: false, status: resp.status, detail: `HTTP ${resp.status}: ${errBody}` }
+    return { ok: false, status: resp.status, detail: `HTTP ${resp.status}: ${errBody}`, retryAfterSeconds }
   }
 
   const chatJson = await resp.json()
@@ -360,6 +391,81 @@ async function callLLMProvider(
       truncated: finishReason === 'length'
     }
   }
+}
+
+// Best-effort: a failure here must never affect the parse result, and it
+// runs after the response is sent where the runtime allows, so it adds no
+// latency. Only headers that are actually present are written — PostgREST's
+// merge-duplicates upsert updates just the columns in the payload, so a
+// response missing some headers doesn't blank out the last known values.
+function recordQuotaStatus(resp: Response, retryAfterSeconds: number | null) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return
+
+  const now = Date.now()
+  const row: Record<string, unknown> = {
+    provider: 'groq',
+    model: LLM_MODEL,
+    last_status: resp.status,
+    updated_at: new Date(now).toISOString()
+  }
+  const setInt = (column: string, header: string) => {
+    const value = Number.parseInt(resp.headers.get(header) ?? '', 10)
+    if (Number.isFinite(value)) row[column] = value
+  }
+  const setResetAt = (column: string, header: string) => {
+    const ms = parseGroqDuration(resp.headers.get(header))
+    if (ms != null) row[column] = new Date(now + ms).toISOString()
+  }
+  setInt('limit_requests', 'x-ratelimit-limit-requests')
+  setInt('remaining_requests', 'x-ratelimit-remaining-requests')
+  setResetAt('requests_reset_at', 'x-ratelimit-reset-requests')
+  setInt('limit_tokens', 'x-ratelimit-limit-tokens')
+  setInt('remaining_tokens', 'x-ratelimit-remaining-tokens')
+  setResetAt('tokens_reset_at', 'x-ratelimit-reset-tokens')
+  if (resp.status === 429) {
+    // No retry-after on a 429 still means "limited" — assume a short wait
+    // rather than showing the parser as ready.
+    row.rate_limited_until = new Date(now + (retryAfterSeconds ?? 60) * 1000).toISOString()
+  } else if (resp.ok) {
+    row.rate_limited_until = null
+  }
+
+  const write = fetch(`${SUPABASE_URL}/rest/v1/llm_quota_status`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+      Prefer: 'resolution=merge-duplicates,return=minimal'
+    },
+    body: JSON.stringify(row)
+  })
+    .then(async (r) => {
+      if (!r.ok) console.error(`Recording LLM quota status failed: ${r.status} ${(await r.text()).slice(0, 200)}`)
+    })
+    .catch((err) => console.error(`Recording LLM quota status failed: ${err instanceof Error ? err.name : err}`))
+
+  if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(write)
+}
+
+// Groq reports resets as Go-style durations: "2m59.56s", "7.66s", "860ms",
+// "1h2m3s". Returns milliseconds, or null if absent/unrecognised.
+function parseGroqDuration(value: string | null): number | null {
+  if (!value) return null
+  let total = 0
+  let matched = false
+  for (const [, amount, unit] of value.matchAll(/(\d+(?:\.\d+)?)(ms|h|m|s)/g)) {
+    matched = true
+    const n = Number.parseFloat(amount)
+    total += unit === 'h' ? n * 3_600_000 : unit === 'm' ? n * 60_000 : unit === 's' ? n * 1000 : n
+  }
+  return matched ? Math.round(total) : null
+}
+
+function parseRetryAfter(value: string | null): number | null {
+  if (!value) return null
+  const seconds = Number.parseFloat(value)
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : null
 }
 
 function jsonResponse(body: unknown, status = 200, extraHeaders: Record<string, string> = {}) {

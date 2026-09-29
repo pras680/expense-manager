@@ -538,7 +538,7 @@ async function processRow(
         // the bank instead ("UOB"), for the same charge. Same card + same amount + same
         // calendar date is an independent signal strong enough to catch that case even
         // when merchant text shares nothing.
-        if (cardKey && r.card_bank && r.card_last4 && r.date === normalizedDate) {
+        if (cardKey && r.card_bank && r.card_last4 && utcDay(r.date) === utcDay(normalizedDate)) {
           return `${r.card_bank.toLowerCase()}|${r.card_last4}` === cardKey
         }
         return false
@@ -787,4 +787,12 @@ function isMissingColumnError(status: number, body: string): boolean {
 
 function jsonResponse(body: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, ...extraHeaders } })
+}
+
+// Calendar day (UTC) of a stored or incoming date. The card+same-day duplicate
+// rule used to compare raw strings, which never matched: PostgREST returns
+// '2026-09-27T00:00:00+00:00' where toISOString() gives '...T00:00:00.000Z'.
+function utcDay(value: string | null | undefined): string | null {
+  const t = new Date(value ?? '')
+  return Number.isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10)
 }

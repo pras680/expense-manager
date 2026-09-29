@@ -250,11 +250,20 @@ interface DuplicateCandidateRow {
 // guard in process-sms-inbox/scan-gmail. Those two run as service_role and
 // filter by household by hand; here RLS already scopes the select to the
 // caller's own + household rows, so no explicit filter is needed.
+// Calendar day (UTC, same basis every pipeline normalizes dates to) of a
+// stored or incoming date. The card rule below used to compare raw strings,
+// which never matched: PostgREST returns '2026-09-27T00:00:00+00:00' while
+// toISOString() gives '2026-09-27T00:00:00.000Z' — same instant, different text.
+function utcDay(value: string | null | undefined): string | null {
+  const t = new Date(value ?? '')
+  return Number.isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10)
+}
+
 async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<DuplicateCandidateRow | null> {
   const incomingRichness = SOURCE_RICHNESS[input.source ?? 'manual'] ?? 2
   const d = new Date(input.date)
   if (Number.isNaN(d.getTime())) return null
-  const normalizedDate = d.toISOString()
+  const incomingDay = utcDay(input.date)
   const from = new Date(d.getTime() - 24 * 60 * 60 * 1000).toISOString()
   const to = new Date(d.getTime() + 24 * 60 * 60 * 1000).toISOString()
 
@@ -269,7 +278,7 @@ async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<Duplicat
 
   const needle = input.merchant.trim().toLowerCase()
   const cardKey = input.cardBank && input.cardLast4 ? `${input.cardBank.toLowerCase()}|${input.cardLast4}` : null
-  const match = (rows as DuplicateCandidateRow[]).find((r) => {
+  const matches = (rows as DuplicateCandidateRow[]).filter((r) => {
     // Only worth merging into a strictly less-rich existing source — an
     // equal-or-richer one is either a genuinely separate purchase or already
     // the best copy of this data, so it's left alone (a plain duplicate, same
@@ -281,12 +290,19 @@ async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<Duplicat
     // Same reasoning as the edge functions' guard: merchant text disagrees
     // across sources more often than expected, but the same card charged on
     // the same calendar date is an independently strong signal on its own.
-    if (cardKey && r.card_bank && r.card_last4 && r.date === normalizedDate) {
+    if (cardKey && r.card_bank && r.card_last4 && utcDay(r.date) === incomingDay) {
       return `${r.card_bank.toLowerCase()}|${r.card_last4}` === cardKey
     }
     return false
   })
-  return match ?? null
+  // More than one thinner copy of the same charge can exist (e.g. two SMS
+  // alerts for one purchase). Prefer the one still waiting for review — that's
+  // the copy this save is meant to complete — then the closest in time.
+  const distance = (r: DuplicateCandidateRow) => Math.abs(new Date(r.date ?? '').getTime() - d.getTime()) || 0
+  matches.sort((a, b) =>
+    Number(a.reviewed_at !== null) - Number(b.reviewed_at !== null) || distance(a) - distance(b)
+  )
+  return matches[0] ?? null
 }
 
 function mergeRawOcrJson(existingRaw: Record<string, unknown>, input: ReceiptWriteInput): Record<string, unknown> {
@@ -325,10 +341,11 @@ async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptW
     if (!existing.file_url && input.fileUrl) body.file_url = input.fileUrl
     const resp = await authorizedFetch(`${REST_URL}/receipts?id=eq.${existing.id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+      headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
       body: JSON.stringify(body)
     })
     await throwIfNotOk(resp, 'Merge receipt failed')
+    await throwIfNoRowsUpdated(resp)
     return
   }
 
@@ -348,6 +365,16 @@ async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptW
     }
   }
   await throwIfNotOk(resp, 'Merge receipt failed')
+  await throwIfNoRowsUpdated(resp)
+}
+
+// PostgREST reports a row RLS refused to update as 200 with an empty array —
+// without this, a refused merge looks exactly like a successful one.
+async function throwIfNoRowsUpdated(resp: Response) {
+  const rows = await resp.json()
+  if (Array.isArray(rows) && rows.length === 0) {
+    throw new Error("Couldn't merge into the matching receipt — it belongs to someone you can't edit.")
+  }
 }
 
 /**
@@ -357,7 +384,9 @@ async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptW
  * block a legitimate save, same fail-open convention as the two server-side
  * pipelines' own guards.
  */
-export async function insertOrMergeReceipt(input: ReceiptWriteInput): Promise<{ id: string; merged: boolean }> {
+export async function insertOrMergeReceipt(
+  input: ReceiptWriteInput
+): Promise<{ id: string; merged: boolean; mergedIntoMerchant?: string | null }> {
   let duplicate: DuplicateCandidateRow | null = null
   try {
     duplicate = await findDuplicateForMerge(input)
@@ -366,7 +395,7 @@ export async function insertOrMergeReceipt(input: ReceiptWriteInput): Promise<{ 
   }
   if (duplicate) {
     await mergeIntoReceipt(duplicate, input)
-    return { id: duplicate.id, merged: true }
+    return { id: duplicate.id, merged: true, mergedIntoMerchant: duplicate.merchant }
   }
   const id = await insertReceipt(input)
   return { id, merged: false }
@@ -388,24 +417,98 @@ export async function deleteReceipt(id: string): Promise<void> {
 // Receipt parsing (Edge Function)
 // ---------------------------------------------------------------------------
 
-export async function parseReceiptText(rawText: string): Promise<ParsedReceipt> {
+/**
+ * The parser's LLM provider is rate limited or out of quota (HTTP 429 from
+ * parse-receipt). Distinct from a generic failure so the UI can say "wait N
+ * seconds" instead of "something broke" — nothing is wrong with the receipt.
+ */
+export class ParserRateLimitedError extends Error {
+  retryAfterSeconds: number | null
+
+  constructor(retryAfterSeconds: number | null) {
+    super(
+      retryAfterSeconds != null
+        ? `The receipt reader is at its limit — try again in ${retryAfterSeconds}s.`
+        : 'The receipt reader is at its limit — try again shortly.'
+    )
+    this.name = 'ParserRateLimitedError'
+    this.retryAfterSeconds = retryAfterSeconds
+  }
+}
+
+async function callParseReceipt(body: Record<string, unknown>, failurePrefix: string): Promise<ParsedReceipt> {
   const resp = await authorizedFetch(`${FUNCTIONS_URL}/parse-receipt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw_text: rawText })
+    body: JSON.stringify(body)
   })
-  await throwIfNotOk(resp, 'Parse receipt failed')
+  if (resp.status === 429) {
+    let retryAfter: number | null = null
+    try {
+      const parsed = await resp.json()
+      if (typeof parsed?.retry_after_seconds === 'number') retryAfter = parsed.retry_after_seconds
+    } catch { /* body isn't JSON — fall back to the header */ }
+    if (retryAfter == null) {
+      const header = Number.parseFloat(resp.headers.get('Retry-After') ?? '')
+      if (Number.isFinite(header)) retryAfter = Math.ceil(header)
+    }
+    throw new ParserRateLimitedError(retryAfter)
+  }
+  await throwIfNotOk(resp, failurePrefix)
   return resp.json()
 }
 
-export async function parseReceiptImage(imageBase64: string, imageMimeType: string): Promise<ParsedReceipt> {
-  const resp = await authorizedFetch(`${FUNCTIONS_URL}/parse-receipt`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image_base64: imageBase64, image_mime_type: imageMimeType })
-  })
-  await throwIfNotOk(resp, 'Parse receipt image failed')
-  return resp.json()
+export function parseReceiptText(rawText: string): Promise<ParsedReceipt> {
+  return callParseReceipt({ raw_text: rawText }, 'Parse receipt failed')
+}
+
+export function parseReceiptImage(imageBase64: string, imageMimeType: string): Promise<ParsedReceipt> {
+  return callParseReceipt({ image_base64: imageBase64, image_mime_type: imageMimeType }, 'Parse receipt image failed')
+}
+
+/**
+ * Last-known rate-limit state of the parser's LLM key, as recorded by
+ * parse-receipt from the provider's response headers on its most recent call
+ * from any caller (multiuser-20-llm-quota-status.sql). Deployment-wide, not
+ * per user — the SMS and Gmail crons draw on the same quota.
+ */
+export interface LlmQuotaStatus {
+  model: string | null
+  limitRequests: number | null
+  remainingRequests: number | null
+  requestsResetAt: string | null
+  limitTokens: number | null
+  remainingTokens: number | null
+  tokensResetAt: string | null
+  rateLimitedUntil: string | null
+  lastStatus: number | null
+  updatedAt: string
+}
+
+/** Null when nothing has been recorded yet or the table isn't deployed — callers treat that as "unknown", never as an error. */
+export async function getLlmQuotaStatus(): Promise<LlmQuotaStatus | null> {
+  try {
+    const resp = await authorizedFetch(`${REST_URL}/llm_quota_status?provider=eq.groq&select=*`)
+    if (!resp.ok) return null
+    const rows = await resp.json()
+    const r = Array.isArray(rows) ? rows[0] : null
+    if (!r) return null
+    return {
+      model: r.model ?? null,
+      limitRequests: r.limit_requests ?? null,
+      remainingRequests: r.remaining_requests ?? null,
+      requestsResetAt: r.requests_reset_at ?? null,
+      limitTokens: r.limit_tokens ?? null,
+      remainingTokens: r.remaining_tokens ?? null,
+      tokensResetAt: r.tokens_reset_at ?? null,
+      rateLimitedUntil: r.rate_limited_until ?? null,
+      lastStatus: r.last_status ?? null,
+      updatedAt: r.updated_at
+    }
+  } catch (err) {
+    if (err instanceof AuthRequiredError) throw err
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -751,6 +854,31 @@ export async function deleteHouseholdCategory(id: string): Promise<void> {
     headers: { Prefer: 'return=minimal' }
   })
   await throwIfNotOk(resp, 'Delete category failed')
+}
+
+/**
+ * Renames a custom category and moves everything filed under the old name
+ * with it — the household's receipts (including other members' private ones)
+ * and its learned correction rules. That cross-member update is why this goes
+ * through an RPC rather than a plain PATCH (multiuser-18-rename-household-category.sql).
+ */
+export async function renameHouseholdCategory(id: string, name: string): Promise<void> {
+  const resp = await authorizedFetch(`${REST_URL}/rpc/rename_household_category`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_id: id, p_new_name: name.trim() })
+  })
+  if (!resp.ok) {
+    // The function raises human-readable messages ("X" already exists) —
+    // show those rather than the raw PostgREST error envelope.
+    const body = await resp.text()
+    let message = body.slice(0, 300)
+    try {
+      const parsed = JSON.parse(body)
+      if (typeof parsed?.message === 'string') message = parsed.message
+    } catch { /* not JSON — keep the raw text */ }
+    throw new Error(`Rename failed: ${message}`)
+  }
 }
 
 /** Clears the "needs review" flag once a member has confirmed the details. */

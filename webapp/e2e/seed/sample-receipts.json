@@ -84,12 +84,12 @@
     "comment": "Monthly electricity + water bill."
   },
   {
-    "key": "travel-manual",
+    "key": "commute-manual",
     "merchant": "Grab",
     "daysAgo": 12,
     "total": 23.6,
     "currency": "SGD",
-    "category": "Travel",
+    "category": "Commute",
     "cardBank": "OCBC",
     "cardLast4": "5678",
     "source": "manual",
