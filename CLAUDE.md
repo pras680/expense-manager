@@ -272,11 +272,24 @@ All three converge on the same `receipts` table and the same shape.
 ## Receipt parsing (`parse-receipt`)
 
 - Groq-hosted `qwen/qwen3.6-27b` via an OpenAI-compatible chat completions
-  API (`LLM_API_URL`/`LLM_MODEL` are configurable; the account has churned
-  through Anthropic → Moonshot → Gemini → Groq already). **Any replacement
-  model needs both image input and JSON mode** — the webapp's camera path
-  and the raw-text backfill script both depend on vision; a text-only model
-  breaks them without an obvious error.
+  API (`LLM_MODEL` is configurable, `LLM_API_URL` is hardcoded to Groq's
+  endpoint; the account has churned through Anthropic → Moonshot → Gemini →
+  Groq already). **Any replacement model needs both image input and JSON
+  mode** — the webapp's camera path and the raw-text backfill script both
+  depend on vision; a text-only model breaks them without an obvious error.
+- **Optional fallback provider**: set `FALLBACK_LLM_API_URL` +
+  `FALLBACK_LLM_API_KEY` + `FALLBACK_LLM_MODEL` (all three, or none — a
+  partial set is treated as unconfigured) and a failed primary call
+  (network error, non-2xx, or a 2xx response that isn't usable JSON)
+  retries once against this second OpenAI-compatible endpoint before
+  giving up. Added after a real multi-day outage where Groq silently
+  deprecated the pinned model and every ingestion path (SMS, Gmail,
+  photo/manual) failed identically with no independent path to recover —
+  see `callLLMProvider`/`FALLBACK_CONFIGURED` in `parse-receipt/index.ts`.
+  Same vision+JSON-mode requirement as the primary. Unset by default;
+  behavior is unchanged with no fallback configured. `reasoning_effort`
+  (a qwen/Groq-specific field) is only sent to the primary — the fallback
+  provider is not assumed to recognize it.
 - `max_tokens: 4000` — empirically the ceiling for this account; `8000`
   causes Groq to reject the request outright with 413. Don't raise this
   without a live regression test against real content first (this exact
@@ -536,7 +549,7 @@ Current secrets per function:
 
 | Function | Secrets |
 |---|---|
-| `parse-receipt` | `LLM_API_KEY`, optional `LLM_MODEL`, optional `REQUIRE_AUTH` |
+| `parse-receipt` | `LLM_API_KEY`, optional `LLM_MODEL`, optional `REQUIRE_AUTH`, optional `FALLBACK_LLM_API_URL`/`FALLBACK_LLM_API_KEY`/`FALLBACK_LLM_MODEL` |
 | `receive-sms` | per-user tokens (`sms_ingest_tokens`); `SMS_INGEST_SECRET`/`LEGACY_SMS_USER_ID` only as a migration-window fallback |
 | `process-sms-inbox` | none beyond the injected service role |
 | `scan-gmail` | Gmail OAuth secrets, reads Vault for refresh tokens |
@@ -574,6 +587,16 @@ Current secrets per function:
 - **Never assume a forwarded/connected mailbox is the user's primary
   inbox** — check `gmail_connections.email` before diagnosing a "missing"
   email as a code bug.
+- **A Groq-hosted model can be deprecated/renamed with no warning**, and
+  because every ingestion path shares one `parse-receipt` call, this takes
+  down SMS, Gmail, and photo/manual imports simultaneously — it shows up as
+  `parse-receipt` returning `upstream_status: 404` (not 429/5xx). Check the
+  function's logs for the exact Groq error body, confirm the model still
+  exists, and update `LLM_MODEL` — or configure `FALLBACK_LLM_API_URL`/
+  `FALLBACK_LLM_API_KEY`/`FALLBACK_LLM_MODEL` so a repeat of this fails over
+  automatically instead of going down completely. Stuck `sms_inbox` rows
+  from an outage like this recover via Settings → SMS → View processing
+  log's "Retry all," not by re-forwarding anything.
 
 ## Ad-hoc analysis (`notebooks/`)
 
