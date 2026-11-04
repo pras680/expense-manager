@@ -13,6 +13,21 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
 const LLM_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const LLM_API_KEY = Deno.env.get('LLM_API_KEY')
 const LLM_MODEL = Deno.env.get('LLM_MODEL') ?? 'qwen/qwen3.6-27b'
+
+// Optional second provider, tried only when the primary call fails outright
+// (network error, non-2xx, or a 2xx response that isn't usable JSON) — this
+// account has already been forced off three LLM providers by outages or
+// silent model deprecations (see CLAUDE.md), so a single point of failure
+// here has real production history of causing multi-day total outages
+// across all three ingestion paths at once (SMS, Gmail, photo/manual).
+// Unset by default: with no fallback configured, behavior is byte-for-byte
+// identical to before this existed. Must also be OpenAI-compatible with
+// both vision input and json_mode, same requirement as the primary.
+const FALLBACK_LLM_API_URL = Deno.env.get('FALLBACK_LLM_API_URL')
+const FALLBACK_LLM_API_KEY = Deno.env.get('FALLBACK_LLM_API_KEY')
+const FALLBACK_LLM_MODEL = Deno.env.get('FALLBACK_LLM_MODEL')
+const FALLBACK_CONFIGURED = Boolean(FALLBACK_LLM_API_URL && FALLBACK_LLM_API_KEY && FALLBACK_LLM_MODEL)
+
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')
 
@@ -131,14 +146,7 @@ serve(async (req) => {
         ]
       : `OCR_TEXT:\n\n${raw_text}${correctionHintText}\n\nReturn JSON only.`
 
-    const chatBody = {
-      model: LLM_MODEL,
-      // qwen3.6 is a reasoning model by default, which burns hundreds of
-      // tokens "thinking" in a separate field before ever writing the JSON
-      // answer — unnecessary latency/cost for a fixed-shape extraction task,
-      // so reasoning is turned off. response_format still forces JSON-only
-      // content.
-      //
+    const basePayload = {
       // 4000 is empirically the ceiling, not a conservative choice: raising
       // it to 8000 to give large multi-item receipts more headroom made
       // Groq reject the request outright with 413 (too large) rather than
@@ -146,7 +154,6 @@ serve(async (req) => {
       // somewhere between the two, and 4000 is the last confirmed-working
       // value. Do not raise this without confirming against a real call.
       max_tokens: 4000,
-      reasoning_effort: 'none',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -154,34 +161,38 @@ serve(async (req) => {
       ]
     }
 
-    const resp = await fetch(LLM_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${LLM_API_KEY}`
-      },
-      body: JSON.stringify(chatBody)
+    let result = await callLLMProvider(LLM_API_URL, LLM_API_KEY, LLM_MODEL, basePayload, {
+      includeReasoningEffort: true,
+      // Groq has no quota endpoint; its rate-limit headers on this response
+      // are the only source. Recorded for every caller so the webapp can
+      // show what's left — see multiuser-20-llm-quota-status.sql. Only done
+      // for the primary: the headers/row shape here are Groq-specific, and
+      // a fallback provider's own limits aren't what that table tracks.
+      recordGroqQuota: true
     })
+    let triedFallback = false
 
-    // Groq has no quota endpoint; its rate-limit headers on this response are
-    // the only source. Recorded for every caller so the webapp can show
-    // what's left — see multiuser-20-llm-quota-status.sql.
-    const retryAfterSeconds = parseRetryAfter(resp.headers.get('retry-after'))
-    recordQuotaStatus(resp, retryAfterSeconds)
+    if (!result.ok && FALLBACK_CONFIGURED) {
+      console.error(`Primary LLM call failed (${result.status}): ${result.detail.slice(0, 300)} — retrying with fallback provider.`)
+      triedFallback = true
+      // reasoning_effort is a qwen/Groq-specific knob, not a general
+      // OpenAI-compatible field — omitted for the fallback since we don't
+      // know whether that provider even recognizes it.
+      result = await callLLMProvider(FALLBACK_LLM_API_URL!, FALLBACK_LLM_API_KEY!, FALLBACK_LLM_MODEL!, basePayload, {
+        includeReasoningEffort: false
+      })
+    }
 
-    if (!resp.ok) {
-      // Upstream bodies can carry provider/account/model details and quota state
-      // — log them server-side, but never echo them back to the caller.
-      const errBody = await resp.text()
-      console.error(`LLM request failed with status ${resp.status}: ${errBody}`)
+    if (!result.ok) {
+      console.error(`LLM request failed${triedFallback ? ' (fallback also failed)' : ''}: ${result.detail}`)
       // The status alone is safe to return and is the difference between
       // "you are rate limited / out of quota" (429) and a real fault, which is
       // otherwise indistinguishable from outside the function's logs.
-      if (resp.status === 429) {
+      if (result.status === 429) {
         return jsonResponse(
-          { error: 'Receipt parser is rate limited or out of quota', upstream_status: 429, retry_after_seconds: retryAfterSeconds },
+          { error: 'Receipt parser is rate limited or out of quota', upstream_status: 429, retry_after_seconds: result.retryAfterSeconds ?? null },
           429,
-          retryAfterSeconds != null ? { 'Retry-After': String(retryAfterSeconds) } : {}
+          result.retryAfterSeconds != null ? { 'Retry-After': String(result.retryAfterSeconds) } : {}
         )
       }
       // 413 is the input+requested-output combination exceeding the model's
@@ -189,37 +200,25 @@ serve(async (req) => {
       // finish_reason 'length' below, which is a response cut off mid-stream.
       // Both mean "too big", worth telling apart in logs if the cap (see
       // max_tokens above) ever needs revisiting.
-      if (resp.status === 413) {
+      if (result.status === 413) {
         return jsonResponse({ error: 'Receipt text was too large for the parser', upstream_status: 413 }, 502)
       }
-      return jsonResponse({ error: 'Receipt parser unavailable', upstream_status: resp.status }, 502)
+      if (result.status === 'empty') {
+        return jsonResponse({ error: 'Receipt parser returned no result' }, 502)
+      }
+      if (result.status === 'invalid_json') {
+        // finish_reason 'length' means the response was cut off mid-JSON by
+        // max_tokens, not that the model produced garbage — a large
+        // multi-item receipt (many line_items) is exactly the case that
+        // runs closest to the budget. Worth distinguishing in the
+        // client-visible error: one says "give it more room", the other
+        // says "something is actually wrong".
+        return jsonResponse({ error: 'Receipt parser returned invalid data', truncated: result.truncated }, 502)
+      }
+      return jsonResponse({ error: 'Receipt parser unavailable', upstream_status: result.status }, 502)
     }
 
-    const chatJson = await resp.json()
-    const assistantText = String(chatJson?.choices?.[0]?.message?.content ?? '').trim()
-    const lastFinishReason = chatJson?.choices?.[0]?.finish_reason ?? null
-
-    if (!assistantText) {
-      console.error('LLM response did not include text content.')
-      return jsonResponse({ error: 'Receipt parser returned no result' }, 502)
-    }
-
-    try {
-      const parsed = JSON.parse(extractJsonObject(assistantText))
-      return jsonResponse(parsed)
-    } catch (_err) {
-      console.error(`Receipt parser returned invalid JSON (finish_reason=${lastFinishReason}): ${assistantText}`)
-      // finish_reason 'length' means the response was cut off mid-JSON by
-      // max_tokens, not that the model produced garbage — a large multi-item
-      // receipt (many line_items) is exactly the case that runs closest to the
-      // budget. Worth distinguishing in the client-visible error: one says
-      // "give it more room", the other says "something is actually wrong".
-      const truncated = lastFinishReason === 'length'
-      return jsonResponse(
-        { error: 'Receipt parser returned invalid data', truncated },
-        502
-      )
-    }
+    return jsonResponse(result.data)
   } catch (err) {
     const message = err instanceof Error ? err.name : 'UnknownError'
     console.error(`Receipt parser request failed: ${message}.`)
@@ -312,6 +311,86 @@ function safeHintString(value: unknown) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 80)
+}
+
+type LLMResult =
+  | { ok: true; data: Record<string, unknown> }
+  | {
+      ok: false
+      status: number | 'empty' | 'invalid_json'
+      detail: string
+      truncated?: boolean
+      retryAfterSeconds?: number | null
+    }
+
+// One call to one OpenAI-compatible chat-completions endpoint, normalizing
+// every failure mode (transport error, non-2xx, empty content, unparseable
+// JSON) into one result shape so the caller can try a second provider
+// without duplicating any of this logic.
+async function callLLMProvider(
+  apiUrl: string,
+  apiKey: string,
+  model: string,
+  basePayload: Record<string, unknown>,
+  options: { includeReasoningEffort: boolean; recordGroqQuota?: boolean }
+): Promise<LLMResult> {
+  const chatBody = {
+    ...basePayload,
+    model,
+    // qwen3.6 is a reasoning model by default, which burns hundreds of
+    // tokens "thinking" in a separate field before ever writing the JSON
+    // answer — unnecessary latency/cost for a fixed-shape extraction task,
+    // so reasoning is turned off. response_format still forces JSON-only
+    // content.
+    ...(options.includeReasoningEffort ? { reasoning_effort: 'none' } : {})
+  }
+
+  let resp: Response
+  try {
+    resp = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(chatBody)
+    })
+  } catch (err) {
+    return { ok: false, status: 0, detail: `transport error: ${err instanceof Error ? err.message : String(err)}` }
+  }
+
+  let retryAfterSeconds: number | null = null
+  if (options.recordGroqQuota) {
+    retryAfterSeconds = parseRetryAfter(resp.headers.get('retry-after'))
+    recordQuotaStatus(resp, retryAfterSeconds)
+  }
+
+  if (!resp.ok) {
+    // Upstream bodies can carry provider/account/model details and quota state
+    // — log them server-side, but never echo them back to the caller.
+    const errBody = await resp.text()
+    return { ok: false, status: resp.status, detail: `HTTP ${resp.status}: ${errBody}`, retryAfterSeconds }
+  }
+
+  const chatJson = await resp.json()
+  const assistantText = String(chatJson?.choices?.[0]?.message?.content ?? '').trim()
+  const finishReason = chatJson?.choices?.[0]?.finish_reason ?? null
+
+  if (!assistantText) {
+    return { ok: false, status: 'empty', detail: 'LLM response did not include text content.' }
+  }
+
+  try {
+    const parsed = JSON.parse(extractJsonObject(assistantText))
+    return { ok: true, data: parsed }
+  } catch (_err) {
+    return {
+      ok: false,
+      status: 'invalid_json',
+      detail: `invalid JSON (finish_reason=${finishReason}): ${assistantText}`,
+      truncated: finishReason === 'length'
+    }
+  }
 }
 
 // Best-effort: a failure here must never affect the parse result, and it

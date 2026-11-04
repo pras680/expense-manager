@@ -7,15 +7,19 @@ import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { useParserStatus } from '../hooks/useParserStatus'
 import {
-  insertOrMergeReceipt,
+  findDuplicateForMerge,
+  mergeIntoReceipt,
+  insertReceipt,
   parseReceiptText,
   parseReceiptImage,
   uploadReceiptImage,
   ParserRateLimitedError,
-  type ReceiptWriteInput
+  type ReceiptWriteInput,
+  type DuplicateCandidateRow
 } from '../lib/supabaseClient'
 import { compressImage, blobToBase64 } from '../lib/imageUtils'
 import { DEFAULT_CURRENCY } from '../lib/categories'
+import { SOURCE_LABELS } from '../lib/receiptShape'
 import { formatDuration } from '../lib/parserQuota'
 import { ACCENT } from '../lib/theme'
 import type { ParsedReceipt } from '../types/receipt'
@@ -220,6 +224,62 @@ function ScanningPreview({ src, scanning }: { src: string; scanning: boolean }) 
   )
 }
 
+function MergeConfirmDialog({
+  duplicate,
+  busy,
+  onMerge,
+  onKeepSeparate,
+  onDismiss
+}: {
+  duplicate: DuplicateCandidateRow
+  busy: boolean
+  onMerge: () => void
+  onKeepSeparate: () => void
+  onDismiss: () => void
+}) {
+  const sourceLabel = SOURCE_LABELS[duplicate.source ?? ''] ?? duplicate.source ?? 'another source'
+  const d = new Date(duplicate.date ?? '')
+  const dateLabel = Number.isNaN(d.getTime())
+    ? null
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onDismiss}>
+      <div
+        className="w-full max-w-sm rounded-t-2xl bg-white p-5 sm:rounded-2xl dark:bg-neutral-900"
+        style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-50">Looks like a duplicate</h2>
+        <p className="mt-1.5 text-sm text-neutral-600 dark:text-neutral-400">
+          This matches a receipt already imported via {sourceLabel}
+          {duplicate.merchant ? ` for ${duplicate.merchant}` : ''}
+          {dateLabel ? ` on ${dateLabel}` : ''}, still waiting for review. Merge what you just read into it, or
+          save this as a separate receipt?
+        </p>
+        <div className="mt-5 flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onMerge}
+            disabled={busy}
+            className="rounded-lg bg-accent-700 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {busy ? 'Merging…' : 'Merge into it'}
+          </button>
+          <button
+            type="button"
+            onClick={onKeepSeparate}
+            disabled={busy}
+            className="rounded-lg bg-neutral-100 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-60 dark:bg-neutral-800 dark:text-neutral-100"
+          >
+            {busy ? 'Saving…' : 'Keep as a separate receipt'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -246,6 +306,10 @@ export function AddReceiptPage() {
   const [parseNote, setParseNote] = useState<string | null>(null)
   // A parse the provider rate-limited: what to retry, and when it said to.
   const [cooldown, setCooldown] = useState<{ input: ParseInput; until: number | null } | null>(null)
+  // A likely duplicate found on submit — held here so the user picks merge
+  // vs. separate instead of it happening silently.
+  const [pendingMerge, setPendingMerge] = useState<{ input: ReceiptWriteInput; duplicate: DuplicateCandidateRow } | null>(null)
+  const [mergeChoiceBusy, setMergeChoiceBusy] = useState(false)
 
   function applyOutcome(input: ParseInput, outcome: ParseOutcome) {
     refreshSoon()
@@ -371,26 +435,63 @@ export function AddReceiptPage() {
     setFormValues(input.kind === 'photo' ? emptyFormValues('', input.fileUrl) : emptyFormValues(input.text))
   }
 
+  // The Add tab can be reached from any of the other three tabs, so unlike
+  // EditReceiptPage's single-entry-point back-pop, landing on /receipts is a
+  // deliberate destination here, not "wherever we came from" — but it must
+  // still be a *replace*, not a plain push: a push would leave this
+  // now-submitted Add screen in the back stack, so the next back tap from
+  // /receipts would land right back on a stale add form instead of wherever
+  // the user was before opening Add.
+  //
+  // A merge is otherwise invisible — the new data lands on an existing
+  // receipt instead of a new row — so the list is told which one to point at.
+  function goToReceiptsList(mergedInto?: { id: string; merchant: string | null }) {
+    navigate('/receipts', { replace: true, state: mergedInto ? { mergedInto } : null })
+  }
+
   async function handleSubmit(input: ReceiptWriteInput) {
-    // Silently folds into an existing sms/gmail-sourced receipt for the same
-    // charge when one exists, rather than creating a second record — see
-    // insertOrMergeReceipt.
-    const result = await insertOrMergeReceipt(input)
+    // A same-charge candidate from a thinner source (SMS/Gmail) pauses the
+    // save here instead of merging silently — the user picks merge vs.
+    // separate below. A failed check must never block a legitimate save,
+    // same fail-open convention as the two server-side pipelines' own guards.
+    let duplicate: DuplicateCandidateRow | null = null
+    try {
+      duplicate = await findDuplicateForMerge(input)
+    } catch {
+      duplicate = null
+    }
+    if (duplicate) {
+      setPendingMerge({ input, duplicate })
+      return
+    }
+    await insertReceipt(input)
     await refresh()
-    // The Add tab can be reached from any of the other three tabs, so unlike
-    // EditReceiptPage's single-entry-point back-pop, landing on /receipts is
-    // a deliberate destination here, not "wherever we came from" — but it
-    // must still be a *replace*, not a plain push: a push would leave this
-    // now-submitted Add screen in the back stack, so the next back tap from
-    // /receipts would land right back on a stale add form instead of
-    // wherever the user was before opening Add.
-    //
-    // A merge is otherwise invisible — the new data lands on an existing
-    // receipt instead of a new row — so the list is told which one to point at.
-    navigate('/receipts', {
-      replace: true,
-      state: result.merged ? { mergedInto: { id: result.id, merchant: result.mergedIntoMerchant ?? null } } : null
-    })
+    goToReceiptsList()
+  }
+
+  async function handleMergeChoice(choice: 'merge' | 'separate') {
+    if (!pendingMerge) return
+    const { input, duplicate } = pendingMerge
+    setMergeChoiceBusy(true)
+    setError(null)
+    try {
+      if (choice === 'merge') {
+        await mergeIntoReceipt(duplicate, input)
+        await refresh()
+        setPendingMerge(null)
+        goToReceiptsList({ id: duplicate.id, merchant: duplicate.merchant })
+      } else {
+        await insertReceipt(input)
+        await refresh()
+        setPendingMerge(null)
+        goToReceiptsList()
+      }
+    } catch (err) {
+      setError(errorMessage(err))
+      setPendingMerge(null)
+    } finally {
+      setMergeChoiceBusy(false)
+    }
   }
 
   function reset() {
@@ -420,6 +521,11 @@ export function AddReceiptPage() {
             {parseNote}
           </div>
         )}
+        {error && (
+          <div className="mt-3 border-l-4 border-accent-700 bg-accent-50 px-3 py-2 text-sm text-accent-900 dark:bg-accent-950 dark:text-accent-200">
+            {error}
+          </div>
+        )}
         {imagePreviewUrl && (
           <div className="mt-4 motion-safe:animate-rise">
             <ScanningPreview src={imagePreviewUrl} scanning={false} />
@@ -433,6 +539,15 @@ export function AddReceiptPage() {
             onSubmit={handleSubmit}
           />
         </div>
+        {pendingMerge && (
+          <MergeConfirmDialog
+            duplicate={pendingMerge.duplicate}
+            busy={mergeChoiceBusy}
+            onMerge={() => handleMergeChoice('merge')}
+            onKeepSeparate={() => handleMergeChoice('separate')}
+            onDismiss={() => { if (!mergeChoiceBusy) setPendingMerge(null) }}
+          />
+        )}
       </div>
     )
   }

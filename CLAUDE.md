@@ -155,13 +155,16 @@ All three converge on the same `receipts` table and the same shape.
 - The image is compressed client-side, uploaded to Storage, and sent to
   `parse-receipt` as base64 for vision parsing — in parallel with the
   upload.
-- `insertOrMergeReceipt` (`supabaseClient.ts`, called from `AddReceiptPage`'s
-  `handleSubmit` instead of `insertReceipt` directly) runs the same
-  household/user-scoped, total±$0.01/date±24h/merchant-or-card duplicate
-  check as the two unattended pipelines below, then — this is the one thing
-  that makes this path different — **merges into the match instead of either
-  inserting a second row or discarding the richer data**. See Duplicate
-  detection and merging for the full rule.
+- `AddReceiptPage`'s `handleSubmit` calls `findDuplicateForMerge`
+  (`supabaseClient.ts`) before saving — same household/user-scoped,
+  total±$0.01/date±24h/merchant-or-card duplicate check as the two
+  unattended pipelines below. Unlike those two, a match here doesn't merge
+  silently: the user is shown which existing receipt it matches and picks
+  **"Merge into it"** (`mergeIntoReceipt`) or **"Keep as a separate
+  receipt"** (falls through to a plain `insertReceipt`) — a photo/PDF is
+  richer than an SMS/Gmail candidate but not infallible, and a wrong silent
+  merge is harder to notice than a wrong new row. See Duplicate detection
+  and merging for the full rule.
 
 ### 2. SMS (iOS Shortcut → `receive-sms` → `sms_inbox` → `process-sms-inbox` cron)
 
@@ -273,11 +276,24 @@ All three converge on the same `receipts` table and the same shape.
 ## Receipt parsing (`parse-receipt`)
 
 - Groq-hosted `qwen/qwen3.6-27b` via an OpenAI-compatible chat completions
-  API (`LLM_API_URL`/`LLM_MODEL` are configurable; the account has churned
-  through Anthropic → Moonshot → Gemini → Groq already). **Any replacement
-  model needs both image input and JSON mode** — the webapp's camera path
-  and the raw-text backfill script both depend on vision; a text-only model
-  breaks them without an obvious error.
+  API (`LLM_MODEL` is configurable, `LLM_API_URL` is hardcoded to Groq's
+  endpoint; the account has churned through Anthropic → Moonshot → Gemini →
+  Groq already). **Any replacement model needs both image input and JSON
+  mode** — the webapp's camera path and the raw-text backfill script both
+  depend on vision; a text-only model breaks them without an obvious error.
+- **Optional fallback provider**: set `FALLBACK_LLM_API_URL` +
+  `FALLBACK_LLM_API_KEY` + `FALLBACK_LLM_MODEL` (all three, or none — a
+  partial set is treated as unconfigured) and a failed primary call
+  (network error, non-2xx, or a 2xx response that isn't usable JSON)
+  retries once against this second OpenAI-compatible endpoint before
+  giving up. Added after a real multi-day outage where Groq silently
+  deprecated the pinned model and every ingestion path (SMS, Gmail,
+  photo/manual) failed identically with no independent path to recover —
+  see `callLLMProvider`/`FALLBACK_CONFIGURED` in `parse-receipt/index.ts`.
+  Same vision+JSON-mode requirement as the primary. Unset by default;
+  behavior is unchanged with no fallback configured. `reasoning_effort`
+  (a qwen/Groq-specific field) is only sent to the primary — the fallback
+  provider is not assumed to recognize it.
 - `max_tokens: 4000` — empirically the ceiling for this account; `8000`
   causes Groq to reject the request outright with 413. Don't raise this
   without a live regression test against real content first (this exact
@@ -363,8 +379,9 @@ Scope, matching the duplicate-check precedent: household-scoped (`current_househ
 ## Duplicate detection and merging
 
 Runs in all three ingestion paths now — `process-sms-inbox`, `scan-gmail`,
-and `AddReceiptPage` (via `insertOrMergeReceipt` in `supabaseClient.ts`) —
-structurally identical logic in each, not shared code (no `_shared/`
+and `AddReceiptPage` (via `findDuplicateForMerge`/`mergeIntoReceipt` in
+`supabaseClient.ts`) — structurally identical logic in each, not shared code
+(no `_shared/`
 directory exists for Edge Functions in this repo, and the webapp is a
 different runtime entirely). The webapp's copy is a client-side port of the
 same rule, relying on RLS instead of an explicit `household_id`/`user_id`
@@ -404,7 +421,7 @@ matched anything: PostgREST returns `2026-09-27T00:00:00+00:00` where
 code in all three paths until that was fixed.
 
 When several rows match, the merging paths (`scan-gmail`,
-`insertOrMergeReceipt`) prefer an **unreviewed** one, then the closest in
+`findDuplicateForMerge`) prefer an **unreviewed** one, then the closest in
 time — two thin copies of one charge can coexist (e.g. two SMS alerts), and
 the copy still waiting for review is the one a richer source should
 complete. A webapp merge is announced on the receipts list (a notice with a
@@ -430,20 +447,29 @@ it** instead of creating a second record:
 - **`scan-gmail`**: merges into an existing `sms`-sourced match
   (`mergeIntoExistingReceipt`). A match against an existing `gmail` or
   `manual`/`photo` row is still a plain skip — gmail doesn't outrank either.
-- **`AddReceiptPage` → `insertOrMergeReceipt`**: merges into an existing
-  `sms`- or `gmail`-sourced match (`mergeIntoReceipt`). This is also what
-  closes the old "no duplicate check on this path" gap — manual/photo entry
-  now runs the same guard, it just resolves a hit by merging rather than
-  either silently duplicating (the old behavior) or silently dropping.
+- **`AddReceiptPage`**: on a match against an existing `sms`- or
+  `gmail`-sourced row, the save pauses and the user is asked to confirm —
+  **"Merge into it"** calls `mergeIntoReceipt`, **"Keep as a separate
+  receipt"** falls through to a plain `insertReceipt` instead. This is also
+  what closes the old "no duplicate check on this path" gap — manual/photo
+  entry now runs the same guard; it just asks before folding one receipt
+  into another; unlike the two unattended pipelines, this is the one path
+  where a person is right there to confirm.
 
 Merging itself branches on whether the *existing* row has been reviewed
 (`reviewed_at`):
 
-- **Not yet reviewed** (`reviewed_at is null`): the incoming candidate's
-  structured fields win outright — merchant, category, currency, card info,
-  total/date, and `source` all get overwritten with the richer source's
-  values, exactly as if that source had been the first to import it. This is
-  safe because nobody has confirmed the old, thinner values yet.
+- **Not yet reviewed** (`reviewed_at is null`): the incoming candidate wins
+  outright — structured fields (merchant, category, currency, card info,
+  total/date, `source`) AND `raw_ocr_json`'s own content (raw text, line
+  items, receipt amount), exactly as if that source had been the first to
+  import it. This is safe because nobody has confirmed the old, thinner
+  values yet. The webapp's version of this branch is what makes a photo/PDF
+  upload's own OCR transcription become the merged receipt's raw text
+  instead of the original SMS/email body staying behind under a "merged"
+  label — a real bug (`mergeRawOcrJson` always kept the *existing* row's
+  raw content, even here) until it was fixed alongside adding the
+  confirmation step below.
 - **Already reviewed**: the existing row's structured fields are left
   completely untouched — a human already confirmed them, and a later,
   richer source doesn't get to silently overturn that. Only non-interpretive
@@ -463,8 +489,10 @@ than double-appending the same comment/raw text.
 
 A merge is treated as a success, not a finding — `scan-gmail` does not write
 a `gmail_scan_log` row for it (that log is deliberately a "what went wrong"
-list; a merge is the opposite), and the webapp does it silently with no
-confirmation prompt, same as a normal save.
+list; a merge is the opposite). The two unattended pipelines still merge
+silently — no person is present to ask. `AddReceiptPage` is the one path
+with someone right there in the form, so it asks first instead: see the
+confirmation step in "Manual / photo / PDF" above.
 
 A failed duplicate check (a network error, an unexpected response shape)
 must never block a legitimate save in any of the three paths — same
@@ -582,7 +610,7 @@ Current secrets per function:
 
 | Function | Secrets |
 |---|---|
-| `parse-receipt` | `LLM_API_KEY`, optional `LLM_MODEL`, optional `REQUIRE_AUTH` |
+| `parse-receipt` | `LLM_API_KEY`, optional `LLM_MODEL`, optional `REQUIRE_AUTH`, optional `FALLBACK_LLM_API_URL`/`FALLBACK_LLM_API_KEY`/`FALLBACK_LLM_MODEL` |
 | `receive-sms` | per-user tokens (`sms_ingest_tokens`); `SMS_INGEST_SECRET`/`LEGACY_SMS_USER_ID` only as a migration-window fallback |
 | `process-sms-inbox` | none beyond the injected service role |
 | `scan-gmail` | Gmail OAuth secrets, reads Vault for refresh tokens |
@@ -621,6 +649,16 @@ Current secrets per function:
 - **Never assume a forwarded/connected mailbox is the user's primary
   inbox** — check `gmail_connections.email` before diagnosing a "missing"
   email as a code bug.
+- **A Groq-hosted model can be deprecated/renamed with no warning**, and
+  because every ingestion path shares one `parse-receipt` call, this takes
+  down SMS, Gmail, and photo/manual imports simultaneously — it shows up as
+  `parse-receipt` returning `upstream_status: 404` (not 429/5xx). Check the
+  function's logs for the exact Groq error body, confirm the model still
+  exists, and update `LLM_MODEL` — or configure `FALLBACK_LLM_API_URL`/
+  `FALLBACK_LLM_API_KEY`/`FALLBACK_LLM_MODEL` so a repeat of this fails over
+  automatically instead of going down completely. Stuck `sms_inbox` rows
+  from an outage like this recover via Settings → SMS → View processing
+  log's "Retry all," not by re-forwarding anything.
 
 ## Ad-hoc analysis (`notebooks/`)
 

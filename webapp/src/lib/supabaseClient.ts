@@ -233,7 +233,7 @@ export async function updateReceipt(id: string, input: ReceiptWriteInput): Promi
 // the form, regardless of whether a photo happens to be attached.
 const SOURCE_RICHNESS: Record<ReceiptSource, number> = { sms: 0, gmail: 1, manual: 2, photo: 2 }
 
-interface DuplicateCandidateRow {
+export interface DuplicateCandidateRow {
   id: string
   merchant: string | null
   date: string | null
@@ -259,7 +259,9 @@ function utcDay(value: string | null | undefined): string | null {
   return Number.isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10)
 }
 
-async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<DuplicateCandidateRow | null> {
+// Exported so a caller can check for a match and let the user confirm before
+// committing to a merge (AddReceiptPage), instead of merging silently.
+export async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<DuplicateCandidateRow | null> {
   const incomingRichness = SOURCE_RICHNESS[input.source ?? 'manual'] ?? 2
   const d = new Date(input.date)
   if (Number.isNaN(d.getTime())) return null
@@ -305,10 +307,17 @@ async function findDuplicateForMerge(input: ReceiptWriteInput): Promise<Duplicat
   return matches[0] ?? null
 }
 
-function mergeRawOcrJson(existingRaw: Record<string, unknown>, input: ReceiptWriteInput): Record<string, unknown> {
+// baseRaw is what the merged row's raw_ocr_json content actually becomes;
+// existingRaw is only consulted for its merged_from history, which always
+// carries forward regardless of which side's content wins.
+function mergeRawOcrJson(
+  baseRaw: Record<string, unknown>,
+  existingRaw: Record<string, unknown>,
+  input: ReceiptWriteInput
+): Record<string, unknown> {
   const mergedFrom = Array.isArray(existingRaw.merged_from) ? existingRaw.merged_from as unknown[] : []
   return {
-    ...existingRaw,
+    ...baseRaw,
     merged_from: [
       ...mergedFrom,
       { source: input.source ?? 'manual', merged_at: new Date().toISOString() }
@@ -321,22 +330,26 @@ function mergeRawOcrJson(existingRaw: Record<string, unknown>, input: ReceiptWri
 // one gap insertReceipt alone doesn't cover (manual/photo skip the duplicate
 // guard entirely otherwise). Two write modes, same split as scan-gmail's:
 //
-// - Not yet reviewed: this save IS the review, so the form's fields replace
-//   the thinner ones outright (merchant, category, card info, source).
+// - Not yet reviewed: this save IS the review, so the incoming source's own
+//   content replaces the thinner existing content outright, everywhere —
+//   structured fields (merchant, category, card info, source) AND raw
+//   content (raw_ocr_json, so a photo/PDF's own OCR transcription becomes
+//   the receipt's raw text instead of the original SMS body staying behind
+//   under a 'merged' label).
 // - Already reviewed by a human: their confirmed fields are left untouched;
 //   only raw, non-interpretive content (raw text/line items, a receipt image
 //   if one wasn't already attached, an appended comment) is folded in.
-async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptWriteInput): Promise<void> {
+export async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptWriteInput): Promise<void> {
   const existingRaw = (existing.raw_ocr_json && typeof existing.raw_ocr_json === 'object'
     ? existing.raw_ocr_json as Record<string, unknown>
     : {}) as Record<string, unknown>
-  const mergedRaw = mergeRawOcrJson(existingRaw, input)
   const commentLabel = input.source === 'photo' ? 'photo' : 'manual entry'
   const mergedComment = input.comment && !(existing.comment ?? '').includes(input.comment)
     ? (existing.comment ? `${existing.comment}\n\n[Also seen via ${commentLabel}] ${input.comment}` : input.comment)
     : existing.comment
 
   if (existing.reviewed_at) {
+    const mergedRaw = mergeRawOcrJson(existingRaw, existingRaw, input)
     const body: Record<string, unknown> = { raw_ocr_json: mergedRaw, comment: mergedComment }
     if (!existing.file_url && input.fileUrl) body.file_url = input.fileUrl
     const resp = await authorizedFetch(`${REST_URL}/receipts?id=eq.${existing.id}`, {
@@ -349,12 +362,19 @@ async function mergeIntoReceipt(existing: DuplicateCandidateRow, input: ReceiptW
     return
   }
 
-  const patch = (withOptional: boolean) =>
-    authorizedFetch(`${REST_URL}/receipts?id=eq.${existing.id}`, {
+  const patch = (withOptional: boolean) => {
+    const incomingBody = buildReceiptBody(input, withOptional)
+    const incomingRaw = incomingBody.raw_ocr_json as Record<string, unknown>
+    return authorizedFetch(`${REST_URL}/receipts?id=eq.${existing.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
-      body: JSON.stringify({ ...buildReceiptBody(input, withOptional), raw_ocr_json: mergedRaw, comment: mergedComment })
+      body: JSON.stringify({
+        ...incomingBody,
+        raw_ocr_json: mergeRawOcrJson(incomingRaw, existingRaw, input),
+        comment: mergedComment
+      })
     })
+  }
   let resp = await patch(true)
   if (!resp.ok) {
     const errBody = await resp.text()
@@ -375,30 +395,6 @@ async function throwIfNoRowsUpdated(resp: Response) {
   if (Array.isArray(rows) && rows.length === 0) {
     throw new Error("Couldn't merge into the matching receipt — it belongs to someone you can't edit.")
   }
-}
-
-/**
- * Like insertReceipt, but first checks for an existing sms/gmail-sourced
- * duplicate of the same charge and merges into it instead of creating a
- * second record — see mergeIntoReceipt. A failed duplicate check must never
- * block a legitimate save, same fail-open convention as the two server-side
- * pipelines' own guards.
- */
-export async function insertOrMergeReceipt(
-  input: ReceiptWriteInput
-): Promise<{ id: string; merged: boolean; mergedIntoMerchant?: string | null }> {
-  let duplicate: DuplicateCandidateRow | null = null
-  try {
-    duplicate = await findDuplicateForMerge(input)
-  } catch {
-    duplicate = null
-  }
-  if (duplicate) {
-    await mergeIntoReceipt(duplicate, input)
-    return { id: duplicate.id, merged: true, mergedIntoMerchant: duplicate.merchant }
-  }
-  const id = await insertReceipt(input)
-  return { id, merged: false }
 }
 
 export async function deleteReceipt(id: string): Promise<void> {

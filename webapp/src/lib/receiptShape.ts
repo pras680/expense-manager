@@ -166,7 +166,7 @@ export function hasMergedSources(r: Receipt): boolean {
   return r.mergedFrom.length > 0
 }
 
-const SOURCE_LABELS: Record<string, string> = { sms: 'SMS', gmail: 'Email', photo: 'Photo', manual: 'Manual' }
+export const SOURCE_LABELS: Record<string, string> = { sms: 'SMS', gmail: 'Email', photo: 'Photo', manual: 'Manual' }
 
 /** Human-readable, de-duplicated list of every source that contributed to this receipt (its own `source` plus every merged-in one). */
 export function receiptSourceLabels(r: Receipt): string[] {
