@@ -42,6 +42,23 @@ Without `TEST_USER_EMAIL`/`TEST_USER_PASSWORD` set, seeding no-ops and every
 spec skips itself (rather than failing) so a fresh clone doesn't error out
 of the box.
 
+## Signing in once
+
+Specs don't sign in themselves. The `setup` project (`auth.setup.ts`) signs
+in once through the real form and saves the session to `e2e/.auth/user.json`
+(gitignored, since it holds a live refresh token), and both browser projects
+start from it via `storageState`; `openApp()` in `session.ts` just opens a
+page. Signing in per test meant ~60 password grants a run, and Supabase Auth
+refused them partway through with "Request rate limit reached" even with the
+dashboard's sign-in limit raised. A run now makes 4: seed, setup, and the
+sign-out test on each viewport.
+
+The sign-out test starts from an empty session and signs in through the form
+itself, because the app's sign-out calls `/auth/v1/logout`, which revokes
+every refresh token on the account. Tests still running on the shared
+session keep working on their unexpired access token. A new test that signs
+out must do the same.
+
 ## Sample data (`seed/`)
 
 `seed/sample-receipts.json` is a fixed set of ~10 receipts spanning the

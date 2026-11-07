@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
+import { openApp } from './session'
 
 // Exercises the sample receipts seeded by e2e/seed/ (via playwright.config.ts's
 // globalSetup) — real functionality, not just "does the page load": search,
@@ -11,21 +12,12 @@ const PASSWORD = process.env.TEST_USER_PASSWORD
 
 test.skip(!EMAIL || !PASSWORD, 'TEST_USER_EMAIL/TEST_USER_PASSWORD not set — see webapp/e2e/README.md')
 
-async function signIn(page: Page) {
-  await page.goto('/')
-  await page.getByLabel('Email').fill(EMAIL!)
-  await page.getByLabel('Password').fill(PASSWORD!)
-  await page.getByRole('button', { name: 'Sign In' }).click()
-  await expect(page.getByRole('link', { name: /Home/ })).toBeVisible()
-}
-
 test.beforeEach(async ({ page }) => {
   // The full searchable/filterable receipts list lives at /receipts now —
   // the Home tab ("/") is the LandingPage poster summary instead, which
   // doesn't have a search box. Go straight there rather than through the
   // "View all receipts" CTA, since these specs don't care about that flow.
-  await signIn(page)
-  await page.goto('/receipts')
+  await openApp(page, '/receipts')
 })
 
 test('a reviewed manual receipt shows its merchant, category and card', async ({ page }) => {

@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
+import { openApp } from './session'
 
 // Verifies the LandingPage ("/") implementation against the Claude Design
 // handoff (expense-landing-redesign-options/project/Expense Landing.dc.html,
@@ -16,16 +17,8 @@ const PASSWORD = process.env.TEST_USER_PASSWORD
 
 test.skip(!EMAIL || !PASSWORD, 'TEST_USER_EMAIL/TEST_USER_PASSWORD not set — see webapp/e2e/README.md')
 
-async function signIn(page: Page) {
-  await page.goto('/')
-  await page.getByLabel('Email').fill(EMAIL!)
-  await page.getByLabel('Password').fill(PASSWORD!)
-  await page.getByRole('button', { name: 'Sign In' }).click()
-  await expect(page.getByRole('link', { name: /Home/ })).toBeVisible()
-}
-
 test.beforeEach(async ({ page }) => {
-  await signIn(page)
+  await openApp(page)
 })
 
 test('poster hero shows the current month label and a dollar total', async ({ page }) => {

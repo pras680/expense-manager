@@ -5,6 +5,7 @@ import { defineConfig, devices } from '@playwright/test'
 // runs at module-load time, not inside globalSetup's own process timing.
 import './e2e/seed/load-env.mjs'
 import { startTlsRelay } from './e2e/proxy/tls-relay.mjs'
+import { AUTH_STATE_PATH } from './e2e/session'
 
 // TEST_USER_EMAIL/TEST_USER_PASSWORD must be a real signed-up account in the
 // Supabase project the webapp points at (see src/lib/supabaseClient.ts) —
@@ -48,10 +49,24 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      // Signs in once; the projects below start from the saved session.
+      name: 'setup',
+      testMatch: /auth\.setup\.ts/,
       use: {
         ...devices['Desktop Chrome'],
         ...chromiumUse,
+        launchOptions: process.env.PLAYWRIGHT_CHROMIUM_PATH
+          ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH }
+          : undefined
+      }
+    },
+    {
+      name: 'chromium',
+      dependencies: ['setup'],
+      use: {
+        ...devices['Desktop Chrome'],
+        ...chromiumUse,
+        storageState: AUTH_STATE_PATH,
         // Pre-installed Chromium in this environment; falls back to
         // Playwright's own managed browser wherever that env var isn't set.
         launchOptions: process.env.PLAYWRIGHT_CHROMIUM_PATH
@@ -64,9 +79,11 @@ export default defineConfig({
       // devices['iPhone ...'] preset — that preset defaults to WebKit, which
       // isn't installed in this environment (only Chromium is).
       name: 'mobile-chromium',
+      dependencies: ['setup'],
       use: {
         ...devices['Desktop Chrome'],
         ...chromiumUse,
+        storageState: AUTH_STATE_PATH,
         viewport: { width: 390, height: 844 },
         isMobile: true,
         hasTouch: true,

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { openApp } from './session'
 
 // Requires a real Supabase account (no mock backend — see CLAUDE.md "Auth &
 // registration"). Point these at a disposable test household member, never a
@@ -8,7 +9,7 @@ const PASSWORD = process.env.TEST_USER_PASSWORD
 
 test.skip(!EMAIL || !PASSWORD, 'TEST_USER_EMAIL/TEST_USER_PASSWORD not set — see webapp/e2e/README.md')
 
-async function signIn(page: Page) {
+async function signInThroughForm(page: Page) {
   await page.goto('/')
   await page.getByLabel('Email').fill(EMAIL!)
   await page.getByLabel('Password').fill(PASSWORD!)
@@ -20,7 +21,7 @@ async function signIn(page: Page) {
 
 test.describe('bottom tab navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await signIn(page)
+    await openApp(page)
   })
 
   test('Home tab is the default landing screen', async ({ page }) => {
@@ -58,7 +59,7 @@ test.describe('bottom tab navigation', () => {
 
 test.describe('settings sub-navigation', () => {
   test.beforeEach(async ({ page }) => {
-    await signIn(page)
+    await openApp(page)
     await page.getByRole('link', { name: /Settings/ }).click()
   })
 
@@ -92,7 +93,7 @@ test.describe('settings sub-navigation', () => {
 
 test.describe('receipt edit', () => {
   test.beforeEach(async ({ page }) => {
-    await signIn(page)
+    await openApp(page)
     await page.getByRole('link', { name: 'View all receipts' }).click()
     await expect(page).toHaveURL('/receipts')
   })
@@ -167,10 +168,17 @@ test.describe('receipt edit', () => {
   })
 })
 
-test('sign out returns to the sign-in screen', async ({ page }) => {
-  await signIn(page)
-  await page.getByRole('link', { name: /Settings/ }).click()
-  await page.getByRole('button', { name: 'Sign Out' }).click()
-  await expect(page.getByRole('heading', { name: 'Bill Skills' })).toBeVisible()
-  await expect(page.getByLabel('Email')).toBeVisible()
+test.describe('sign-in and sign-out', () => {
+  // Its own session, not the shared one: sign-out hits /auth/v1/logout, which
+  // by default revokes ALL the account's refresh tokens. Specs still running
+  // on the shared session keep working on their unexpired access token.
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  test('sign out returns to the sign-in screen', async ({ page }) => {
+    await signInThroughForm(page)
+    await page.getByRole('link', { name: /Settings/ }).click()
+    await page.getByRole('button', { name: 'Sign Out' }).click()
+    await expect(page.getByRole('heading', { name: 'Bill Skills' })).toBeVisible()
+    await expect(page.getByLabel('Email')).toBeVisible()
+  })
 })
