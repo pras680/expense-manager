@@ -462,6 +462,60 @@ export function parseReceiptImage(imageBase64: string, imageMimeType: string): P
   return callParseReceipt({ image_base64: imageBase64, image_mime_type: imageMimeType }, 'Parse receipt image failed')
 }
 
+// ---------------------------------------------------------------------------
+// Talk to me (ask-spending agent)
+// ---------------------------------------------------------------------------
+
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AgentToolCall {
+  round: number
+  tool: string
+  args: Record<string, unknown>
+  error?: string
+}
+
+export interface AskSpendingReply {
+  reply: string
+  toolCalls: AgentToolCall[]
+  stepsExhausted: boolean
+}
+
+/** The message is user-facing as-is (the edge function words its errors for people). */
+export class AskSpendingError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'AskSpendingError'
+  }
+}
+
+export async function askSpending(message: string, history: ChatTurn[]): Promise<AskSpendingReply> {
+  const resp = await authorizedFetch(`${FUNCTIONS_URL}/ask-spending`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, history })
+  })
+  let body: Record<string, unknown> | null = null
+  try {
+    body = await resp.json()
+  } catch { /* non-JSON body: fall through to the status-based message */ }
+  if (!resp.ok) {
+    const serverMessage = typeof body?.error === 'string' ? body.error : null
+    if (resp.status === 404) throw new AskSpendingError("Talk to me isn't set up on this server yet.")
+    if (resp.status === 503) throw new AskSpendingError(serverMessage ?? "Talk to me isn't configured yet.")
+    if (resp.status === 429) throw new AskSpendingError('I’m getting too many questions right now — try again in a minute.')
+    throw new AskSpendingError(serverMessage ?? `Something went wrong (HTTP ${resp.status}).`)
+  }
+  return {
+    reply: typeof body?.reply === 'string' ? body.reply : '',
+    toolCalls: Array.isArray(body?.tool_calls) ? (body.tool_calls as AgentToolCall[]) : [],
+    stepsExhausted: body?.steps_exhausted === true
+  }
+}
+
 /**
  * Last-known rate-limit state of the parser's LLM key, as recorded by
  * parse-receipt from the provider's response headers on its most recent call

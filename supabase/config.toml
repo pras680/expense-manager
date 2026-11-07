@@ -22,6 +22,11 @@ verify_jwt = true
 [functions.manage-household]
 verify_jwt = true
 
+# ask-spending reads the caller's role claim (must be "authenticated") the same
+# unverified way, so it relies on the gateway check too.
+[functions.ask-spending]
+verify_jwt = true
+
 # receive-sms is called by an iOS Shortcut, which cannot hold a Supabase JWT.
 # It authenticates instead with a per-user token from sms_ingest_tokens, checked
 # in the function body (see resolveOwner).

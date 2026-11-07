@@ -22,6 +22,8 @@ import { GmailSetupPage } from './pages/GmailSetupPage'
 import { GmailScanLogPage } from './pages/GmailScanLogPage'
 import { SmsScanLogPage } from './pages/SmsScanLogPage'
 import { useSwipeBack } from './hooks/useSwipeBack'
+import { ChatProvider } from './hooks/useChat'
+import { TalkToMe } from './components/TalkToMe'
 
 /** Renders nothing; exists so the gesture hook sits inside the router. */
 function SwipeBackLayer() {
@@ -87,6 +89,9 @@ function AuthGate() {
             </Routes>
           </div>
           <NavBar />
+          <ChatProvider>
+            <TalkToMe />
+          </ChatProvider>
         </ReceiptsProvider>
       </SettingsProvider>
     </BrowserRouter>

@@ -1,0 +1,11 @@
+{
+  "imports": {
+    "@langchain/core/": "npm:/@langchain/core@1.3.2/",
+    "@langchain/groq": "npm:@langchain/groq@1.3.1",
+    "@langchain/langgraph": "npm:@langchain/langgraph@1.6.0",
+    "@langchain/langgraph/": "npm:/@langchain/langgraph@1.6.0/",
+    "zod": "npm:zod@4.6.7",
+    "langsmith": "npm:langsmith@0.11.6",
+    "langsmith/": "npm:/langsmith@0.11.6/"
+  }
+}
