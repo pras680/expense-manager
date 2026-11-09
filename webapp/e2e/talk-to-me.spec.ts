@@ -93,6 +93,54 @@ test.describe('Talk to me', () => {
     expect(bodies[1].history).toEqual([{ role: 'user', content: 'hello' }])
   })
 
+  test('Retry re-asks a failed question without the failure in history', async ({ page }) => {
+    const bodies: Array<{ message: string; history: unknown[] }> = []
+    await page.route(ASK_URL, async (route) => {
+      bodies.push(route.request().postDataJSON())
+      if (bodies.length === 1) {
+        await route.fulfill({
+          status: 502,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'I tripped over my own lookup. Try asking again, or rephrase it.', code: 'tool_call_failed' })
+        })
+      } else {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ reply: 'Last bought on 3 Oct.', tool_calls: [] }) })
+      }
+    })
+
+    await launcher(page).click()
+    await panel(page).getByLabel('Your question').fill('When did I order biriyani?')
+    await panel(page).getByLabel('Your question').press('Enter')
+    await expect(panel(page).getByText('I tripped over my own lookup')).toBeVisible()
+
+    await panel(page).getByRole('button', { name: 'Retry' }).click()
+    await expect(panel(page).getByText('Last bought on 3 Oct.')).toBeVisible()
+    await expect(panel(page).getByText('I tripped over my own lookup')).toBeHidden()
+    // The question shows once, not once per attempt.
+    await expect(panel(page).getByText('When did I order biriyani?')).toHaveCount(1)
+    expect(bodies[1]).toEqual({ message: 'When did I order biriyani?', history: [] })
+  })
+
+  test('a dropped connection says so and offers Retry, instead of a raw browser error', async ({ page }) => {
+    await page.route(ASK_URL, (route) => route.abort('connectionreset'))
+    await launcher(page).click()
+    await panel(page).getByLabel('Your question').fill('hello')
+    await panel(page).getByLabel('Your question').press('Enter')
+    await expect(panel(page).getByText("Couldn't reach the chat. Check your connection and try again.")).toBeVisible()
+    await expect(panel(page).getByRole('button', { name: 'Retry' })).toBeVisible()
+  })
+
+  test('no Retry when the chat is not configured, since asking again cannot help', async ({ page }) => {
+    await page.route(ASK_URL, (route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Chat is not configured' }) })
+    )
+    await launcher(page).click()
+    await panel(page).getByLabel('Your question').fill('hello')
+    await panel(page).getByLabel('Your question').press('Enter')
+    await expect(panel(page).getByText('Chat is not configured')).toBeVisible()
+    await expect(panel(page).getByRole('button', { name: 'Retry' })).toBeHidden()
+  })
+
   test('the conversation survives navigation, and New chat clears it', async ({ page }) => {
     await page.route(ASK_URL, (route) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ reply: 'Noted.', tool_calls: [] }) })

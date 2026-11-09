@@ -49,7 +49,7 @@ export function TalkToMe() {
 }
 
 function ChatPanel() {
-  const { messages, sending, send, reset, setOpen } = useChat()
+  const { messages, sending, send, retry, reset, setOpen } = useChat()
   const [draft, setDraft] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -78,7 +78,7 @@ function ChatPanel() {
   const submit = (text: string) => {
     if (!text.trim() || sending) return
     setDraft('')
-    void send(text)
+    send(text)
   }
 
   return (
@@ -122,7 +122,9 @@ function ChatPanel() {
           <EmptyState onPick={submit} />
         ) : (
           <div className="flex flex-col gap-3">
-            {messages.map((m) => <Bubble key={m.id} message={m} />)}
+            {messages.map((m) => (
+              <Bubble key={m.id} message={m} onRetry={sending ? undefined : () => retry(m.id)} />
+            ))}
             {sending && <TypingIndicator />}
           </div>
         )}
@@ -194,7 +196,7 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   )
 }
 
-function Bubble({ message }: { message: ChatMessage }) {
+function Bubble({ message, onRetry }: { message: ChatMessage; onRetry?: () => void }) {
   if (message.role === 'user') {
     return (
       <div className="ml-10 self-end bg-neutral-900 px-3.5 py-2.5 text-sm whitespace-pre-wrap text-white dark:bg-neutral-100 dark:text-neutral-900">
@@ -214,6 +216,18 @@ function Bubble({ message }: { message: ChatMessage }) {
       >
         {renderInline(message.content)}
       </div>
+      {message.retryQuestion && onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-1.5 flex h-9 items-center gap-1.5 border border-neutral-300 bg-white px-3 text-xs font-semibold text-neutral-800 active:border-neutral-900 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4" />
+          </svg>
+          Retry
+        </button>
+      )}
       {message.toolCalls && message.toolCalls.length > 0 && <LookupTrail calls={message.toolCalls} />}
     </div>
   )

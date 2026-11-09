@@ -19,7 +19,11 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'yyyy-mm-dd')
 export function makeTools(callRpc: RpcCaller) {
   // Tools return a STRING: it becomes the content of a ToolMessage the model
   // reads next. JSON is the easiest format for it to read numbers back from.
-  const run = async (fn: string, args: Record<string, unknown>) => JSON.stringify(await callRpc(fn, args))
+  // Every result is re-sent on each later model call in the question, against
+  // Groq's per-minute token budget. Long free-text fields (parser comments,
+  // item descriptions) are clipped: the model needs to recognise a row, not
+  // reread its full note.
+  const run = async (fn: string, args: Record<string, unknown>) => compact(await callRpc(fn, args))
 
   const spendingByCategory = tool(
     ({ from, to }) => run('ask_spending_by_category', { p_from: from, p_to: to }),
@@ -73,7 +77,7 @@ export function makeTools(callRpc: RpcCaller) {
     ({ search, from, to, category, limit }) =>
       run('ask_find_receipts', {
         p_search: search ?? null, p_from: from ?? null, p_to: to ?? null,
-        p_category: category ?? null, p_limit: limit ?? 20
+        p_category: category ?? null, p_limit: limit ?? 10
       }),
     {
       name: 'find_receipts',
@@ -86,7 +90,7 @@ export function makeTools(callRpc: RpcCaller) {
         from: isoDate.optional(),
         to: isoDate.optional(),
         category: z.string().optional(),
-        limit: z.number().int().min(1).max(50).optional().describe('Default 20')
+        limit: z.number().int().min(1).max(50).optional().describe('Default 10')
       })
     }
   )
@@ -99,16 +103,16 @@ export function makeTools(callRpc: RpcCaller) {
       const range = { p_from: from ?? null, p_to: to ?? null }
       const [summary, items] = await Promise.all([
         callRpc('ask_line_item_summary', { p_search: item, ...range }),
-        callRpc('ask_find_line_items', { p_search: item, ...range, p_limit: 30 })
+        callRpc('ask_find_line_items', { p_search: item, ...range, p_limit: 15 })
       ])
-      return JSON.stringify({ summary: Array.isArray(summary) ? summary[0] : summary, items })
+      return compact({ summary: Array.isArray(summary) ? summary[0] : summary, items })
     },
     {
       name: 'search_purchased_items',
       description:
         'Search the itemised lines on receipts (what was actually bought) for a product, e.g. "cheese pizza", "milk", "AirPods". ' +
         'Returns summary.times_bought (number of matching line items), receipts_with_item, total_spent, first/last date, ' +
-        'plus up to 30 matching items. Matching is case-insensitive and needs ALL words in any order, so use short singular ' +
+        'plus up to 15 matching items (the summary counts ALL of them). Matching is case-insensitive and needs ALL words in any order, so use short singular ' +
         'terms ("pizza" not "pizzas"); search again with a variant (e.g. "margherita") if nothing matches. ' +
         'summary.other_receipts_mentioning counts receipts that mention the item in their text but are not itemised ' +
         '(e.g. emailed receipts): mention them as "possibly more". Use for "how many times did I buy X", "how much do I spend on X".',
@@ -121,4 +125,15 @@ export function makeTools(callRpc: RpcCaller) {
   )
 
   return [spendingByCategory, spendingByMonth, topMerchants, findReceipts, searchPurchasedItems]
+}
+
+const MAX_TEXT_CHARS = 120
+
+/** JSON with long strings clipped and nulls dropped, to keep tool results small. */
+function compact(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => {
+    if (v === null) return undefined
+    if (typeof v === 'string' && v.length > MAX_TEXT_CHARS) return `${v.slice(0, MAX_TEXT_CHARS)}…`
+    return v
+  })
 }

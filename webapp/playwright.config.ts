@@ -41,7 +41,9 @@ export default defineConfig({
   expect: { timeout: 5_000 },
   fullyParallel: false,
   retries: 0,
-  reporter: [['list']],
+  // html: browsable report of the last run (npx playwright show-report),
+  // with traces and screenshots for failures. playwright-report/ is gitignored.
+  reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
     trace: 'retain-on-failure',

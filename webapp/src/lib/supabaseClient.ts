@@ -486,27 +486,46 @@ export interface AskSpendingReply {
 
 /** The message is user-facing as-is (the edge function words its errors for people). */
 export class AskSpendingError extends Error {
-  constructor(message: string) {
+  /** False when asking again can't help (not deployed, not configured). */
+  readonly retryable: boolean
+  constructor(message: string, retryable = true) {
     super(message)
     this.name = 'AskSpendingError'
+    this.retryable = retryable
   }
 }
 
+// Longer than the function's own worst case (a few 20s model calls), so the
+// server's clearer timeout error normally arrives first.
+const ASK_TIMEOUT_MS = 90_000
+
 export async function askSpending(message: string, history: ChatTurn[]): Promise<AskSpendingReply> {
-  const resp = await authorizedFetch(`${FUNCTIONS_URL}/ask-spending`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, history })
-  })
+  let resp: Response
+  try {
+    resp = await authorizedFetch(`${FUNCTIONS_URL}/ask-spending`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, history }),
+      signal: AbortSignal.timeout(ASK_TIMEOUT_MS)
+    })
+  } catch (err) {
+    if (err instanceof AuthRequiredError) throw err
+    // fetch() itself rejected: no readable response at all. Safari words
+    // this "Load failed", Chrome "Failed to fetch"; both mean the same here.
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new AskSpendingError('That took too long. Try again, or ask something narrower.')
+    }
+    throw new AskSpendingError("Couldn't reach the chat. Check your connection and try again.")
+  }
   let body: Record<string, unknown> | null = null
   try {
     body = await resp.json()
   } catch { /* non-JSON body: fall through to the status-based message */ }
   if (!resp.ok) {
     const serverMessage = typeof body?.error === 'string' ? body.error : null
-    if (resp.status === 404) throw new AskSpendingError("Talk to me isn't set up on this server yet.")
-    if (resp.status === 503) throw new AskSpendingError(serverMessage ?? "Talk to me isn't configured yet.")
-    if (resp.status === 429) throw new AskSpendingError('I’m getting too many questions right now — try again in a minute.')
+    if (resp.status === 404) throw new AskSpendingError("Talk to me isn't set up on this server yet.", false)
+    if (resp.status === 503) throw new AskSpendingError(serverMessage ?? "Talk to me isn't configured yet.", false)
+    if (resp.status === 429) throw new AskSpendingError(serverMessage ?? "I'm getting too many questions right now. Try again in a minute.")
     throw new AskSpendingError(serverMessage ?? `Something went wrong (HTTP ${resp.status}).`)
   }
   return {
