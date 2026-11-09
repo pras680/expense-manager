@@ -8,31 +8,28 @@
 // Secrets:
 // - CHAT_LLM_API_KEY  a Groq key SEPARATE from parse-receipt's LLM_API_KEY.
 // - CHAT_MODEL        optional; must support tool calling.
+// - CHAT_LLM_*_FB<n>  optional fallback providers (see providers.ts).
 // - LANGSMITH_*        optional; tracing (see tracing.ts).
 // Injected by Supabase: SUPABASE_URL, SUPABASE_ANON_KEY.
 
-import { ChatGroq } from '@langchain/groq'
 import { AIMessage, BaseMessage, HumanMessage, ToolMessage } from '@langchain/core/messages'
 import { GraphRecursionError } from '@langchain/langgraph'
 import { makeTools, type RpcCaller } from './tools.ts'
-import { buildGraph, isToolUseFailed } from './graph.ts'
+import { buildGraph, isRateLimited, isToolUseFailed, retryAfterSeconds } from './graph.ts'
+import { loadProviders, MODEL_SETTINGS } from './providers.ts'
 import { flushTraces, hashUser, tracingConfig, tracingEnabled } from './tracing.ts'
 
-const CHAT_LLM_API_KEY = Deno.env.get('CHAT_LLM_API_KEY')
-const CHAT_MODEL = Deno.env.get('CHAT_MODEL') ?? 'llama-3.3-70b-versatile'
-// Groq counts max_tokens against the model's OUTPUT-tokens-per-minute limit
-// BEFORE generating (free tier qwen: 1000/min). 1024 made every call fail with
-// 429; and a 3-round question makes 3 calls. Answers are short by design
-// (system prompt), so 300 is ample. Raise via CHAT_MAX_TOKENS on a paid tier.
-const CHAT_MAX_TOKENS = Number(Deno.env.get('CHAT_MAX_TOKENS') ?? 300)
+const providers = loadProviders()
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? ''
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 const MAX_MESSAGE_CHARS = 1_000
 // Prior turns the client sends so follow-ups ("and last month?") resolve.
 // Only the visible text of each turn is replayed, never tool results, so
-// history costs input tokens roughly equal to what the user can see on screen.
-const MAX_HISTORY_TURNS = 10
-const MAX_HISTORY_TURN_CHARS = 2_000
+// history costs input tokens roughly equal to what the user can see on screen,
+// on EVERY model call in the question. 6 turns = the last 3 exchanges, enough
+// for "and last month?"; answers are short, so 600 chars rarely clips one.
+const MAX_HISTORY_TURNS = 6
+const MAX_HISTORY_TURN_CHARS = 600
 const TIME_ZONE = 'Asia/Singapore'
 // Each node run is one "step". agent + tools = 2 steps per lookup round, so 10
 // allows about 4 rounds of lookups plus the final answer. Caps Groq spend if
@@ -46,35 +43,6 @@ const corsHeaders = {
   'Content-Type': 'application/json'
 }
 
-// Per model call. A question makes up to ~5 calls; without a cap a stalled
-// upstream outlives the client's connection and Safari reports "Load failed".
-const CHAT_CALL_TIMEOUT_MS = 20_000
-
-// Built lazily: ChatGroq's constructor THROWS without a key (see lesson 01).
-// Two instances: temperature 0 normally, a little higher only for retrying a
-// malformed tool call (graph.ts), where 0 would likely repeat the same output.
-const models = new Map<number, ChatGroq>()
-function getModel(temperature = 0): ChatGroq {
-  let m = models.get(temperature)
-  if (!m) {
-    m = new ChatGroq({
-      apiKey: CHAT_LLM_API_KEY,
-      model: CHAT_MODEL,
-      temperature,
-      maxTokens: CHAT_MAX_TOKENS,
-      timeout: CHAT_CALL_TIMEOUT_MS,
-      maxRetries: 0, // a 429 retried in-request just hangs; the client shows a Retry button instead
-      // Qwen models on Groq "think" first by default, and those hidden reasoning
-      // tokens count as OUTPUT tokens against the same per-minute limit.
-      // parse-receipt turns it off for the same reason. Other model families
-      // don't take this parameter, so only send it to qwen.
-      ...(CHAT_MODEL.startsWith('qwen/') ? { reasoningEffort: 'none' as const } : {})
-    })
-    models.set(temperature, m)
-  }
-  return m
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return jsonResponse({ error: 'Method not allowed' }, 405)
@@ -82,7 +50,7 @@ Deno.serve(async (req) => {
   // verify_jwt has checked the signature upstream; we require a real user.
   const bearer = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim()
   if (jwtRole(bearer) !== 'authenticated') return jsonResponse({ error: 'Unauthorized' }, 401)
-  if (!CHAT_LLM_API_KEY) return jsonResponse({ error: 'Chat is not configured' }, 503)
+  if (providers.length === 0) return jsonResponse({ error: 'Chat is not configured' }, 503)
 
   let message: string
   let history: BaseMessage[]
@@ -116,7 +84,7 @@ Deno.serve(async (req) => {
   // Built per request because the tools close over THIS caller's JWT.
   // Compiling a two-node graph is cheap (no I/O). See lesson 03 for the
   // build-once alternative using config.configurable.
-  const graph = buildGraph({ model: getModel(0), retryModel: getModel(0.6), tools, systemPrompt })
+  const { graph, answeredBy } = buildGraph({ providers, tools, systemPrompt })
 
   // Our own id for this run, so the response can carry it (later: thumbs
   // up/down from the Ask page is attached to it as LangSmith feedback).
@@ -134,13 +102,19 @@ Deno.serve(async (req) => {
         runId,
         runName: 'ask-spending',
         tags: ['ask-spending', 'stage-3'],
-        metadata: { model: CHAT_MODEL, max_tokens: CHAT_MAX_TOKENS, user_hash: await hashUser(jwtSub(bearer)) },
+        metadata: {
+          model: MODEL_SETTINGS.model,
+          max_tokens: MODEL_SETTINGS.maxTokens,
+          providers: providers.map((p) => `${p.name}:${p.model}`),
+          user_hash: await hashUser(jwtSub(bearer))
+        },
         ...tracingConfig()
       }
     )
     return jsonResponse({
       reply: lastText(final.messages),
       ...summarise(final.messages),
+      answered_by: [...answeredBy],
       run_id: tracingEnabled ? runId : null
     })
   } catch (err) {
@@ -156,8 +130,8 @@ Deno.serve(async (req) => {
       })
     }
     console.error(`ask-spending failed: ${err instanceof Error ? err.message : err}`)
-    const { status, code, error } = classifyError(err)
-    return jsonResponse({ error, code }, status)
+    const { status, code, error, retryAfter } = classifyError(err)
+    return jsonResponse({ error, code, ...(retryAfter !== null ? { retry_after_seconds: retryAfter } : {}) }, status)
   } finally {
     // Failed runs are traced too (that's when you most need them).
     await flushTraces()
@@ -192,22 +166,29 @@ function summarise(messages: BaseMessage[]) {
 }
 
 // `code` lets the app pick wording and offer Retry; `error` is a readable fallback.
-function classifyError(err: unknown): { status: number; code: string; error: string } {
+function classifyError(err: unknown): { status: number; code: string; error: string; retryAfter: number | null } {
   const e = err as { status?: number; name?: string; message?: string }
   const msg = typeof e?.message === 'string' ? e.message : ''
-  if (e?.status === 429) {
-    return { status: 429, code: 'rate_limited', error: "I'm getting too many questions right now. Try again in a minute." }
+  if (isRateLimited(err)) {
+    const after = retryAfterSeconds(err)
+    const wait = after !== null ? Math.ceil(after) : null
+    return {
+      status: 429, code: 'rate_limited', retryAfter: wait,
+      error: wait !== null && wait <= 120
+        ? `I'm getting too many questions right now. Try again in ${wait} seconds.`
+        : "I'm getting too many questions right now. Try again in a minute."
+    }
   }
   if (e?.status === 413 || /request too large/i.test(msg)) {
-    return { status: 413, code: 'too_large', error: 'That needed more data than I can read at once. Try a shorter period or a more specific question.' }
+    return { status: 413, code: 'too_large', retryAfter: null, error: 'That needed more data than I can read at once. Try a shorter period or a more specific question.' }
   }
   if (isToolUseFailed(err)) {
-    return { status: 502, code: 'tool_call_failed', error: 'I tripped over my own lookup. Try asking again, or rephrase it.' }
+    return { status: 502, code: 'tool_call_failed', retryAfter: null, error: 'I tripped over my own lookup. Try asking again, or rephrase it.' }
   }
   if (e?.name === 'APIConnectionTimeoutError' || e?.name === 'TimeoutError' || /timed? ?out/i.test(msg)) {
-    return { status: 504, code: 'timeout', error: 'That took too long to look up. Try again, or ask something narrower.' }
+    return { status: 504, code: 'timeout', retryAfter: null, error: 'That took too long to look up. Try again, or ask something narrower.' }
   }
-  return { status: 502, code: 'failed', error: 'Something went wrong answering that. Try again.' }
+  return { status: 502, code: 'failed', retryAfter: null, error: 'Something went wrong answering that. Try again.' }
 }
 
 // Client-supplied, so treated as untrusted: only user/assistant roles (a
@@ -246,6 +227,11 @@ function systemPrompt(): string {
     `Never guess or invent numbers: if a question needs data, call a tool. If the tools return nothing, say so.`,
     `Earlier answers in this conversation are context only. For a follow-up (a new period, category or merchant),`,
     `look the figures up again; never add up, subtract or reuse numbers from earlier answers.`,
+    `If the user questions or disputes an answer, look it up again. If the data still says the same, keep the figure`,
+    `and explain what it counts: spend totals leave out Local Transfer and Credit Card Bill Payment; receipts in another`,
+    `currency with no conversion are not added in (uncounted_receipts says how many); other members' private receipts`,
+    `and receipts not yet imported can't be seen. Never change a figure only because the user disagrees, and never treat`,
+    `amounts the user types as recorded spending.`,
     `Category names: Groceries, Food & Dining, Electronics, Clothing, Entertainment, Fuel, EV Charging, Utilities,`,
     `Travel, Commute, Health, Home, Subscriptions, Services, Local Transfer, Credit Card Bill Payment,`,
     `ATM Cash Withdrawal, Miscellaneous (households may add their own).`,

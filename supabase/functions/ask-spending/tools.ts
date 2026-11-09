@@ -30,9 +30,9 @@ export function makeTools(callRpc: RpcCaller) {
     {
       name: 'spending_by_category',
       description:
-        'Total spend per category between two dates (inclusive), largest first. ' +
-        'Excludes money that only moved between accounts (Local Transfer, Credit Card Bill Payment). ' +
-        'Use for "how much on X", "where did my money go", category breakdowns.',
+        'Spend per category between two dates (inclusive), largest first. Excludes Local Transfer and Credit Card Bill Payment. ' +
+        'uncounted_receipts = receipts in another currency with no conversion, not in the total. ' +
+        'For "how much on X", "where did my money go".',
       schema: z.object({
         from: isoDate.describe('Start date, inclusive'),
         to: isoDate.describe('End date, inclusive')
@@ -46,8 +46,7 @@ export function makeTools(callRpc: RpcCaller) {
     {
       name: 'spending_by_month',
       description:
-        'Total spend per calendar month (YYYY-MM) between two dates, optionally for a single category. ' +
-        'Use for trends and month-vs-month comparisons.',
+        'Spend per month (YYYY-MM) between two dates, optionally for one category. For trends and month comparisons.',
       schema: z.object({
         from: isoDate.describe('Start date, inclusive'),
         to: isoDate.describe('End date, inclusive'),
@@ -62,8 +61,7 @@ export function makeTools(callRpc: RpcCaller) {
     {
       name: 'top_merchants',
       description:
-        'Merchants ranked by total spend between two dates, optionally within one category. ' +
-        'Use for "where do I spend most", "top restaurants", "how much at Grab".',
+        'Merchants ranked by spend between two dates, optionally in one category. For "top restaurants", "how much at Grab".',
       schema: z.object({
         from: isoDate.describe('Start date, inclusive'),
         to: isoDate.describe('End date, inclusive'),
@@ -82,9 +80,8 @@ export function makeTools(callRpc: RpcCaller) {
     {
       name: 'find_receipts',
       description:
-        'List individual receipts, newest first, filtered by text (merchant, comment, line items, or anything printed on the receipt; all words must match), ' +
-        'date range and/or category. INCLUDES transfers and card-bill payments. ' +
-        'Use for "when did I last…", "show me the receipts for…", or to explain a total.',
+        'Individual receipts, newest first, filtered by text (all words must appear in merchant, comment or receipt text), ' +
+        'dates and/or category. Includes transfers and card-bill payments. For "when did I last…" or explaining a total.',
       schema: z.object({
         search: z.string().optional().describe('Text to look for, e.g. "IKEA" or "DBS"'),
         from: isoDate.optional(),
@@ -110,12 +107,10 @@ export function makeTools(callRpc: RpcCaller) {
     {
       name: 'search_purchased_items',
       description:
-        'Search the itemised lines on receipts (what was actually bought) for a product, e.g. "cheese pizza", "milk", "AirPods". ' +
-        'Returns summary.times_bought (number of matching line items), receipts_with_item, total_spent, first/last date, ' +
-        'plus up to 15 matching items (the summary counts ALL of them). Matching is case-insensitive and needs ALL words in any order, so use short singular ' +
-        'terms ("pizza" not "pizzas"); search again with a variant (e.g. "margherita") if nothing matches. ' +
-        'summary.other_receipts_mentioning counts receipts that mention the item in their text but are not itemised ' +
-        '(e.g. emailed receipts): mention them as "possibly more". Use for "how many times did I buy X", "how much do I spend on X".',
+        'Search itemised receipt lines (what was bought) for a product, e.g. "milk", "AirPods". summary counts ALL matches ' +
+        '(times_bought, receipts_with_item, total_spent, first/last date); items lists up to 15. All words must match, so use ' +
+        'short singular terms and retry a variant if nothing matches. summary.other_receipts_mentioning = un-itemised receipts ' +
+        'mentioning it: say "possibly more". For "how often did I buy X".',
       schema: z.object({
         item: z.string().min(2).describe('Product words to look for'),
         from: isoDate.optional().describe('Start date, inclusive; omit for all time'),
@@ -129,10 +124,11 @@ export function makeTools(callRpc: RpcCaller) {
 
 const MAX_TEXT_CHARS = 120
 
-/** JSON with long strings clipped and nulls dropped, to keep tool results small. */
+/** JSON with long strings clipped and nulls (and zero uncounted_receipts) dropped, to keep tool results small. */
 function compact(value: unknown): string {
-  return JSON.stringify(value, (_key, v) => {
+  return JSON.stringify(value, (key, v) => {
     if (v === null) return undefined
+    if (key === 'uncounted_receipts' && Number(v) === 0) return undefined
     if (typeof v === 'string' && v.length > MAX_TEXT_CHARS) return `${v.slice(0, MAX_TEXT_CHARS)}…`
     return v
   })

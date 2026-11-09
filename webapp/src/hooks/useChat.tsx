@@ -25,7 +25,7 @@ interface ChatContextValue {
 }
 
 // Matches the edge function's MAX_HISTORY_TURNS; sending more is just discarded.
-const HISTORY_TURNS = 10
+const HISTORY_TURNS = 6
 const MAX_MESSAGE_CHARS = 1_000
 
 const ChatContext = createContext<ChatContextValue | null>(null)
