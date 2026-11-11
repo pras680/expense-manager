@@ -54,6 +54,42 @@ function hasNumber(reply: { content: unknown }): boolean {
   return typeof reply.content === 'string' && /\d/.test(reply.content)
 }
 
+// Two fallback-model failure modes seen live (Kimi and Gemini via Vercel's
+// gateway): a reply with neither text nor a tool call, which reached the user
+// as a blank answer; and re-requesting a lookup it already has, looping until
+// the step limit. Both get one re-ask with tools switched off, so the model
+// has to answer from the results it already holds.
+const ANSWER_NOW_NOTE =
+  'You already have the lookup results you need above. Answer the question now, in words, from those results.'
+
+function replyText(reply: { content: unknown }): string {
+  if (typeof reply.content === 'string') return reply.content
+  if (Array.isArray(reply.content)) {
+    return reply.content.map((p) => (typeof p === 'string' ? p : (p as { text?: string })?.text ?? '')).join('')
+  }
+  return ''
+}
+
+function isEmptyReply(reply: { content: unknown; tool_calls?: unknown[] }): boolean {
+  return !reply.tool_calls?.length && replyText(reply).trim() === ''
+}
+
+function lookupKey(call: { name: string; args: Record<string, unknown> }): string {
+  const args = Object.keys(call.args ?? {}).sort().map((k) => [k, call.args[k]])
+  return `${call.name}:${JSON.stringify(args)}`
+}
+
+/** True when every lookup the reply asks for was already run, with the same arguments, for this question. */
+function repeatsLookups(reply: { tool_calls?: { name: string; args: Record<string, unknown> }[] }, messages: BaseMessage[]): boolean {
+  if (!reply.tool_calls?.length) return false
+  const done = new Set<string>()
+  for (let i = messages.length - 1; i >= 0 && !(messages[i] instanceof HumanMessage); i--) {
+    const m = messages[i] as { tool_calls?: { name: string; args: Record<string, unknown> }[] }
+    for (const c of m.tool_calls ?? []) done.add(lookupKey(c))
+  }
+  return reply.tool_calls.every((c) => done.has(lookupKey(c)))
+}
+
 // When every provider fails and Groq said how long to wait (its per-minute
 // window, typically ~10s), wait once and try it again rather than fail. Capped
 // per question so a long wait can't outlast the client's patience.
@@ -90,13 +126,19 @@ const coolingUntil = new Map<string, number>()
 const DEFAULT_COOLDOWN_S = 30
 
 type Bound = ReturnType<NonNullable<BaseChatModel['bindTools']>>
+/** auto: model decides; required: must call a lookup; none: must answer in words. */
+type ToolMode = 'auto' | 'required' | 'none'
 
 export function buildGraph(opts: { providers: Provider[]; tools: Tools; systemPrompt: () => string }) {
   // Bound per request: the tools close over this caller's JWT.
   const bound = opts.providers.map((p) => {
-    const bind = (warm: boolean, required: boolean) =>
-      p.chat(warm).bindTools!(opts.tools, required ? { tool_choice: 'required' } : undefined)
-    return { provider: p, normal: bind(false, false), warm: bind(true, false), required: bind(false, true) }
+    const bind = (warm: boolean, mode: ToolMode) =>
+      p.chat(warm).bindTools!(opts.tools, mode === 'auto' ? undefined : { tool_choice: mode })
+    return {
+      provider: p,
+      auto: bind(false, 'auto'), required: bind(false, 'required'), none: bind(false, 'none'),
+      warm: bind(true, 'auto')
+    }
   })
   /** Which providers actually answered calls in this request, for the response and logs. */
   const answeredBy = new Set<string>()
@@ -112,10 +154,19 @@ export function buildGraph(opts: { providers: Provider[]; tools: Tools; systemPr
   // `config` is passed through so tracing and cancellation reach the model.
   async function agent(state: typeof MessagesAnnotation.State, config: LangGraphRunnableConfig) {
     const system = opts.systemPrompt()
-    let reply = await callModel(false, system, state.messages, config)
+    const answerNow = () => callModel('none', `${system}\n${ANSWER_NOW_NOTE}`, state.messages, config)
+    let reply = await callModel('auto', system, state.messages, config)
     if (!reply.tool_calls?.length && hasNumber(reply) && !lookedUpThisTurn(state.messages)) {
       console.warn('ask-spending: answered with figures but no lookup; forcing a tool call')
-      reply = await callModel(true, `${system}\n${MUST_LOOK_UP_NOTE}`, state.messages, config)
+      reply = await callModel('required', `${system}\n${MUST_LOOK_UP_NOTE}`, state.messages, config)
+    }
+    if (repeatsLookups(reply, state.messages)) {
+      console.warn(`ask-spending: model repeated a lookup it already has (${reply.tool_calls!.map((c) => c.name).join(', ')}); asking it to answer`)
+      reply = await answerNow()
+    } else if (isEmptyReply(reply) && lookedUpThisTurn(state.messages)) {
+      const meta = reply.response_metadata as { finish_reason?: string } | undefined
+      console.warn(`ask-spending: empty reply (finish_reason=${meta?.finish_reason ?? 'unknown'}); asking again with tools off`)
+      reply = await answerNow()
     }
     return { messages: [reply] }
   }
@@ -124,7 +175,7 @@ export function buildGraph(opts: { providers: Provider[]; tools: Tools; systemPr
   // wait-and-retry on the primary when it was only rate limited; otherwise the
   // primary's error is thrown, since that's the one worth explaining.
   async function callModel(
-    requireTool: boolean, system: string, messages: BaseMessage[], config: LangGraphRunnableConfig
+    mode: ToolMode, system: string, messages: BaseMessage[], config: LangGraphRunnableConfig
   ): ReturnType<Bound['invoke']> {
     const now = Date.now()
     const isCooling = (b: (typeof bound)[number]) => (coolingUntil.get(b.provider.name) ?? 0) > now
@@ -132,7 +183,7 @@ export function buildGraph(opts: { providers: Provider[]; tools: Tools; systemPr
     let primaryErr: unknown = null
     for (const b of order) {
       try {
-        return await callProvider(b, requireTool, system, messages, config)
+        return await callProvider(b, mode, system, messages, config)
       } catch (err) {
         if (b === bound[0]) primaryErr = err
         if (isRateLimited(err)) {
@@ -146,7 +197,7 @@ export function buildGraph(opts: { providers: Provider[]; tools: Tools; systemPr
       waitedS += wait
       console.warn(`ask-spending: every provider failed; waiting ${wait}s for ${bound[0].provider.name}'s rate limit`)
       await sleep(Math.ceil(wait * 1000) + 250)
-      return await callProvider(bound[0], requireTool, system, messages, config)
+      return await callProvider(bound[0], mode, system, messages, config)
     }
     throw primaryErr
   }
@@ -154,12 +205,12 @@ export function buildGraph(opts: { providers: Provider[]; tools: Tools; systemPr
   // The note joins the one leading system message: some chat templates
   // (Qwen's included) reject a system message anywhere but first.
   async function callProvider(
-    b: (typeof bound)[number], requireTool: boolean, system: string, messages: BaseMessage[], config: LangGraphRunnableConfig
+    b: (typeof bound)[number], mode: ToolMode, system: string, messages: BaseMessage[], config: LangGraphRunnableConfig
   ): ReturnType<Bound['invoke']> {
     for (let attempt = 0; ; attempt++) {
       try {
         const reply = attempt === 0
-          ? await (requireTool ? b.required : b.normal).invoke([new SystemMessage(system), ...messages], config)
+          ? await b[mode].invoke([new SystemMessage(system), ...messages], config)
           : await b.warm.invoke([new SystemMessage(`${system}\n${RETRY_NOTE}`), ...messages], config)
         answeredBy.add(b.provider.name)
         coolingUntil.delete(b.provider.name)
