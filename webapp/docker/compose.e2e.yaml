@@ -1,0 +1,154 @@
+# Local Docker test environment for the webapp (NOT deployment — Vercel is
+# unchanged). Driven by docker/e2e.sh; see e2e/README.md "Docker test
+# environment". Fixed project name so down/clean only touch this stack.
+name: billskills-e2e
+
+x-workspace: &workspace
+  working_dir: /app
+  init: true
+  volumes:
+    - ..:/app
+    # The host's .env.local points at the LIVE Supabase project: masked.
+    - ./empty.env:/app/.env.local:ro
+    # Linux node_modules (the host's macOS one has native binaries).
+    - node_modules:/app/node_modules
+  env_file:
+    # Test-project Supabase URL/anon key + test login. Gitignored (*.local).
+    - path: ../.env.e2e.local
+      required: false
+
+networks:
+  default: {}
+  # No route to the internet. The claude container lives only here; its one
+  # way out is the allowlist proxy, which is on both networks.
+  agent:
+    internal: true
+
+services:
+  deps:
+    <<: *workspace
+    image: node:22-bookworm-slim
+    command: ["sh", "docker/deps.sh"]
+
+  app:
+    <<: *workspace
+    image: node:22-bookworm-slim
+    depends_on:
+      deps: { condition: service_completed_successfully }
+    command: ["sh", "docker/app.sh", "dev"]
+    environment:
+      # Vite rejects unknown Host headers; lets containers use http://app:5173.
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: app,app-prod
+    networks: [default, agent]
+    ports:
+      - "127.0.0.1:${E2E_APP_PORT:-5180}:5173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 120s
+
+  app-prod:
+    <<: *workspace
+    image: node:22-bookworm-slim
+    profiles: ["prod"]
+    depends_on:
+      deps: { condition: service_completed_successfully }
+    command: ["sh", "docker/app.sh", "prod"]
+    environment:
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: app,app-prod
+    networks: [default, agent]
+    ports:
+      - "127.0.0.1:${E2E_PROD_PORT:-4180}:4173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4173/').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 100
+      start_period: 300s
+
+  e2e:
+    <<: *workspace
+    # Must match @playwright/test in package-lock.json (1.63.0).
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    profiles: ["test"]
+    depends_on:
+      deps: { condition: service_completed_successfully }
+    environment:
+      E2E_BASE_URL: ${E2E_TARGET_URL:-http://app:5173}
+      E2E_ARTIFACTS_DIR: e2e-artifacts
+      PLAYWRIGHT_HTML_OUTPUT_DIR: e2e-artifacts/report
+    # Chromium needs more than Docker's 64MB /dev/shm (instead of ipc: host).
+    shm_size: 1gb
+    entrypoint: ["sh", "docker/e2e-entry.sh"]
+
+  report:
+    <<: *workspace
+    image: mcr.microsoft.com/playwright:v1.63.0-noble
+    profiles: ["report"]
+    command: ["npx", "playwright", "show-report", "e2e-artifacts/report", "--host", "0.0.0.0", "--port", "9323"]
+    ports:
+      - "127.0.0.1:${E2E_REPORT_PORT:-9323}:9323"
+
+  proxy:
+    build: ./proxy
+    image: billskills-e2e/proxy
+    profiles: ["agent"]
+    init: true
+    environment:
+      # Hostname only (no key), computed by e2e.sh from .env.e2e.local.
+      E2E_SUPABASE_HOST: ${E2E_SUPABASE_HOST:-}
+      E2E_SUPABASE_PORT: ${E2E_SUPABASE_PORT:-}
+    networks: [default, agent]
+
+  claude:
+    build: ./claude
+    image: billskills-e2e/claude
+    profiles: ["agent"]
+    init: true
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    depends_on:
+      deps: { condition: service_completed_successfully }
+    networks: [agent]
+    shm_size: 1gb
+    volumes:
+      # Whole repo (CLAUDE.md, supabase/functions, docs), read/write.
+      - ../..:/workspace
+      # Live secrets and Mac-session permissions, masked with empty files.
+      - ./empty.env:/workspace/webapp/.env.local:ro
+      - ./empty.env:/workspace/notebooks/.env:ro
+      - ./empty.json:/workspace/.claude/settings.local.json:ro
+      - node_modules:/workspace/webapp/node_modules
+      # Claude's own login/settings: a Docker volume, not your ~/.claude.
+      - claude-home:/home/pwuser/.claude
+    env_file:
+      - path: ../.env.e2e.local
+        required: false
+    environment:
+      HTTPS_PROXY: http://proxy:3128
+      HTTP_PROXY: http://proxy:3128
+      https_proxy: http://proxy:3128
+      http_proxy: http://proxy:3128
+      NO_PROXY: app,app-prod,localhost,127.0.0.1
+      no_proxy: app,app-prod,localhost,127.0.0.1
+      # Node's built-in fetch (seed script) only honours HTTPS_PROXY with this.
+      NODE_USE_ENV_PROXY: "1"
+      # Chromium talks to squid directly (see playwright.config.ts).
+      E2E_PROXY_DIRECT: "1"
+      E2E_BASE_URL: http://app:5173
+      E2E_ARTIFACTS_DIR: e2e-artifacts
+      PLAYWRIGHT_HTML_OUTPUT_DIR: e2e-artifacts/report
+      LIVE_SUPABASE_HOST: ${LIVE_SUPABASE_HOST:-}
+      E2E_SUPABASE_HOST: ${E2E_SUPABASE_HOST:-}
+      E2E_SUPABASE_PORT: ${E2E_SUPABASE_PORT:-}
+      GIT_AUTHOR_NAME: ${GIT_AUTHOR_NAME:-}
+      GIT_AUTHOR_EMAIL: ${GIT_AUTHOR_EMAIL:-}
+      GIT_COMMITTER_NAME: ${GIT_AUTHOR_NAME:-}
+      GIT_COMMITTER_EMAIL: ${GIT_AUTHOR_EMAIL:-}
+
+volumes:
+  node_modules:
+  claude-home:

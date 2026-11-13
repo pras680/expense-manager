@@ -1,16 +1,21 @@
 # E2E test suite
 
 Playwright, driven against the real Supabase backend (there is no mock —
-see the root `CLAUDE.md` "Auth & registration"). Two specs today:
+see the root `CLAUDE.md` "Auth & registration"). The specs:
 
-- `navigation.spec.ts` — sign-in, bottom-tab navigation, settings sub-pages,
-  sign-out. Doesn't depend on any particular data being present.
-- `receipts-data.spec.ts` — exercises the sample receipts seeded by
-  `seed/` (search, category badges, the unreviewed "Check" queue, Reports
-  reflecting real data). Read-only: it only asserts against seeded fixtures,
-  never edits/deletes/approves, so it's safe to run alongside other specs
-  against the same shared test account without one test's mutation breaking
-  another's expectations.
+- `navigation.spec.ts` — the five tabs, the You page's rows and theme picker,
+  the receipt edit flow's back stack, sign-in and sign-out.
+- `landing-page.spec.ts` — Home: the hero, the Ask bar, the stat tiles, and
+  where each of them leads.
+- `receipts-data.spec.ts` — exercises the sample receipts seeded by `seed/`
+  (search, what each row shows, the "To review" filter, Insights reflecting
+  real data). Read-only: it only asserts against seeded fixtures, never
+  edits/deletes/approves, so it's safe to run alongside other specs against
+  the same shared test account.
+- `drill-down.spec.ts` — Insights: total -> category -> merchant -> receipt,
+  and the breadcrumb trail back up. Read-only.
+- `talk-to-me.spec.ts` — the spending chat, with the edge function stubbed.
+- `visual-review.spec.ts` — screenshots and layout checks of every screen.
 
 ## Setup
 
@@ -98,3 +103,100 @@ prefer creating your own throwaway receipt over relying on a seeded one
 surviving the test. Add new fixtures to `seed/sample-receipts.json` (each
 needs a unique `key`, used both for the `[e2e-seed]` marker and as a stable
 handle in assertions) rather than hardcoding one-off data inline in a spec.
+
+## Docker test environment
+
+A local, disposable environment for running this suite in containers
+(`docker/compose.e2e.yaml`, Compose project `billskills-e2e`). It is for
+testing only: Vercel stays the deployment platform, and nothing here changes
+its configuration.
+
+- `deps`: one-shot Linux `npm ci` into a named volume (your Mac's
+  `node_modules` is never touched); reruns only when `package-lock.json`
+  changes.
+- `app`: Vite dev server, `http://127.0.0.1:5180` on the host,
+  `http://app:5173` on the Compose network.
+- `app-prod` (profile `prod`): `tsc -b` + `vite build` + `vite preview`;
+  build output stays inside the container, so `webapp/dist` is left alone.
+- `e2e` (profile `test`): `mcr.microsoft.com/playwright:v1.63.0-noble`,
+  matching `@playwright/test` 1.63.0 in the lockfile. Keep these in step.
+
+**Backend.** The intended test backend is a local Supabase on your Mac with
+the live structure and no live data: see `supabase-edge/local-test/README.md`.
+Containers never see `webapp/.env.local` (the live project):
+it is masked by an empty file. They read `webapp/.env.e2e.local` instead
+(copy `docker/.env.e2e.example`), which must point at a *separate* Supabase
+test project; `docker/e2e.sh` refuses to run if it names the same host as
+`.env.local`. Without `.env.e2e.local`, the app points at an unroutable
+placeholder: signed-out screens are tested, signed-in specs self-skip.
+
+```bash
+webapp/docker/e2e.sh up          # start the dev server
+webapp/docker/e2e.sh test        # full suite (desktop + mobile)
+webapp/docker/e2e.sh shots       # screenshots + layout checks only (visual-review.spec.ts)
+webapp/docker/e2e.sh prod        # build + preview the production bundle, run the suite on it
+webapp/docker/e2e.sh report      # HTML report at http://127.0.0.1:9323
+webapp/docker/e2e.sh logs app    # follow logs (app | app-prod | deps)
+webapp/docker/e2e.sh down        # stop; keeps the node_modules volume
+webapp/docker/e2e.sh clean       # remove only this environment's containers + volumes
+webapp/docker/e2e.sh agent       # open Claude Code in its locked-down container (below)
+webapp/docker/e2e.sh doctor      # verify that container's boundaries (PASS/FAIL)
+```
+
+Extra arguments go to `playwright test`, e.g.
+`webapp/docker/e2e.sh test navigation --project=mobile-chromium`.
+
+Artifacts land in `webapp/e2e-artifacts/` (gitignored): `report/`,
+`results/` (traces, failure screenshots), `screenshots/`
+(`<project>--<screen>.png`, desktop 1440×900 and mobile 390×844) and
+`visual-findings.json` (overflow, off-screen elements, broken images,
+console/network errors per screen). The screenshots are for review, not
+approved baselines.
+
+**Not covered locally** (needs a Vercel preview): Vercel's SPA routing and
+rewrites, headers and caching, the real HTTPS origin (service worker/PWA
+install, OAuth redirect URIs such as the Gmail callback), and environment
+variables as configured in Vercel.
+
+### Claude Code in a container (`e2e.sh agent`)
+
+An optional `claude` service (profile `agent`) runs Claude Code next to the
+app so it can edit code, run the suite, open screenshots and rerun, without
+access to the rest of your Mac or to Docker itself.
+
+- **Image:** `docker/claude/Dockerfile`, the Playwright 1.63.0 image plus
+  Claude Code (npm), git, ripgrep, curl. Runs as non-root `pwuser`. No Docker
+  CLI, no socket, not privileged, no extra capabilities.
+- **Mounts:** the repo at `/workspace` (read/write) and the shared
+  `node_modules` volume. Masked with empty files: `webapp/.env.local` (live
+  Supabase), `notebooks/.env` (live `DATABASE_URL`, TypeSafe key) and
+  `.claude/settings.local.json` (your Mac sessions' broad pre-approvals).
+  Claude's login lives in the `claude-home` volume; your `~/.claude`, `~/.ssh`,
+  keychain and home folder are never mounted.
+- **Network:** the container is only on the `agent` network
+  (`internal: true`, no route out). It reaches the app at `http://app:5173`
+  directly, and everything else through `proxy` (`docker/proxy/`, squid),
+  which allows only `api.anthropic.com`, `claude.ai`, `claude.com`,
+  `platform.claude.com`, `registry.npmjs.org`, Google Fonts and the test
+  Supabase host from `.env.e2e.local`. The live project and every other host
+  are refused. A local test Supabase (`http://host.docker.internal:54321`)
+  gets an exact host+port rule instead, so your Mac's other ports stay
+  unreachable. Denials show in `webapp/docker/e2e.sh logs proxy`.
+- **Permissions:** `docker/claude/managed-settings.json` (copied into the
+  image, highest precedence): file edits and `npx playwright test`,
+  `npm run build|lint`, `npx tsc`, `git status|diff|log|add|commit` run
+  without asking; `git push`, `git remote`, `git config` and edits to
+  `webapp/docker/**` and `.claude/**` are denied; bypass-permissions mode is
+  disabled; everything else asks. Nonessential traffic, the auto-updater and
+  claude.ai MCP connectors are off.
+- **Not available inside, by design:** starting or stopping containers,
+  `docker logs` (app output is also written to `e2e-artifacts/logs/`),
+  pushing, Supabase deploys or migrations, the live database.
+
+First run: `e2e.sh agent` builds the two images, starts `app` and `proxy`,
+and opens Claude Code. Sign in with the URL it prints (open it in your Mac's
+browser, paste the code back); the login is kept in `claude-home` until
+`e2e.sh clean`. Run `e2e.sh doctor` any time to check the boundaries.
+
+Changes to `webapp/docker/**` only take effect after you rebuild/restart, and
+Claude cannot edit them from inside, so review any diff there yourself.

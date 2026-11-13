@@ -23,11 +23,22 @@ import { AUTH_STATE_PATH } from './e2e/session'
 // re-issues each request upstream using the client/agent combo that's
 // confirmed to work. A plain dev machine or CI runner has real outbound
 // access and doesn't set HTTPS_PROXY, so this stays off there.
-const relay = process.env.HTTPS_PROXY ? await startTlsRelay() : null
-const chromiumUse = relay
+// E2E_PROXY_DIRECT=1 (set only in docker/compose.e2e.yaml's claude service):
+// that container's proxy is a plain squid, which Chromium speaks to fine, and
+// the relay can't carry plain-HTTP requests such as a local Supabase at
+// http://host.docker.internal:54321. So there Chromium uses the proxy directly.
+const directProxy = process.env.E2E_PROXY_DIRECT === '1' ? process.env.HTTPS_PROXY : undefined
+const relay = process.env.HTTPS_PROXY && !directProxy ? await startTlsRelay() : null
+// The app under test is never proxied: localhost on a dev machine, or the
+// Compose service host (e.g. http://app:5173) in docker/compose.e2e.yaml.
+const proxyBypass = ['localhost', '127.0.0.1', process.env.E2E_BASE_URL ? new URL(process.env.E2E_BASE_URL).hostname : '']
+  .filter(Boolean).join(',')
+const chromiumUse = directProxy
+  ? { proxy: { server: directProxy, bypass: proxyBypass } }
+  : relay
   ? {
       ignoreHTTPSErrors: true,
-      proxy: { server: `http://127.0.0.1:${relay.port}`, bypass: 'localhost,127.0.0.1' }
+      proxy: { server: `http://127.0.0.1:${relay.port}`, bypass: proxyBypass }
     }
   : {}
 

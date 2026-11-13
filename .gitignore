@@ -11,4 +11,15 @@ node_modules/
 notebooks/.venv/
 notebooks/.env
 notebooks/.ipynb_checkpoints/
+notebooks/jev_out*/
 
+# Local Supabase test backend (supabase-edge/local-test/README.md)
+supabase-edge/local-test/.schema/
+supabase/functions/.env.local-test
+supabase/.temp/
+supabase/.branches/
+
+# Per-machine Claude Code permissions (the shared ones are .claude/settings.json)
+.claude/settings.local.json
+
+__pycache__/

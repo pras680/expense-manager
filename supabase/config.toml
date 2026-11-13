@@ -37,3 +37,18 @@ verify_jwt = false
 # that key itself in the function body.
 [functions.scan-gmail]
 verify_jwt = true
+
+# Deployed with --no-verify-jwt (callers aren't signed in yet); this makes
+# local serving and `supabase functions deploy` match that.
+[functions.register-user]
+verify_jwt = false
+
+# ---- Local stack only (`supabase start`, the Docker test backend) ----------
+# Analytics' log collector mounts the Docker socket; the test environment
+# avoids that. Signup off mirrors the live dashboard setting: accounts are
+# created only through register-user (admin API, invite code).
+[analytics]
+enabled = false
+
+[auth]
+enable_signup = false
