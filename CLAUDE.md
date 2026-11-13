@@ -232,7 +232,7 @@ All three converge on the same `receipts` table and the same shape.
   picked up.
 - Runs twice a day (`'7 7,19 * * *'`), not every 15 minutes — email is less
   time-sensitive than SMS, and this project has hit rate/quota limits with
-  three different LLM providers already. The Settings → Gmail import
+  three different LLM providers already. The You → Gmail import
   "Scan now" button runs the same function immediately for just the caller.
 - Search query (`QUERY_TERMS`) is a short list of common single words
   (`receipt`, `payment`, `confirmed`, `paynow`, ...), OR'd together, minus
@@ -265,7 +265,7 @@ All three converge on the same `receipts` table and the same shape.
   receipt. Once a message is retry-exhausted it's silently skipped forever
   on every future scan (no new log row) — if a code fix might now let it
   succeed, its `gmail_scan_log` row has to be deleted to get it
-  reconsidered — the Retry button on Settings → Gmail import → Log
+  reconsidered — the Retry button on You → Gmail import → Log
   (`retryGmailScanLogEntry`) does exactly that — and only helps if the message is still inside the current
   `since` window (`last_scan_at - 1 day`, or `DEFAULT_LOOKBACK_DAYS = 7` if
   never scanned) — messages that have aged out need to be re-forwarded, not
@@ -538,7 +538,7 @@ receipts (other members' private ones included) and its correction rules
 have to be moved to the new name in the same call, which ordinary RLS
 wouldn't allow. Clashes with a built-in name are rejected client-side, same
 as on add. `receipts.category` has no DB check
-constraint — it's plain `text`, and Reports/`CategoryBadge` already derive
+constraint — it's plain `text`, and Insights/`CategoryIcon` already derive
 categories from whatever's on each receipt rather than a fixed list — so a
 custom category works everywhere a built-in one does with zero extra
 plumbing on the read side.
@@ -580,6 +580,66 @@ because it's a statement about timing, not about whether the content is
 valid. A failed duplicate-check call never blocks a legitimate insert — it
 fails open, on the reasoning that a missed duplicate is recoverable, a
 dropped real receipt is not.
+
+## Webapp UI: themes, navigation, drill-down
+
+The webapp was restyled end to end (branch `redesign/webapp-makeover`). The
+rules below are what keep new screens consistent with it.
+
+- **Colours are theme tokens, never literals.** `webapp/src/index.css` defines
+  a semantic set — `bg`, `card`, `card-2`, `line`, `ink`, `muted`, `accent`,
+  `on-accent` — as CSS custom properties, exposed as Tailwind utilities
+  (`bg-card`, `text-muted`, `bg-accent text-on-accent`, ...). Each theme is one
+  `[data-theme="..."]` block redefining them. A screen that hardcodes a hex or
+  uses `text-white` on an accent fill breaks in at least one theme (Midnight's
+  accent is a bright lime that white can't be read on — that's what
+  `on-accent` is for).
+- **Six themes, picked on the You page**: Midnight (default), Ember, Ocean,
+  Orchid (dark), Paper, Sorbet (light). The list lives in
+  `webapp/src/lib/theme.ts` (`THEMES`); the choice is stored per device in
+  `localStorage` (`billskills.theme`), not in `user_settings`, and an inline
+  script in `index.html` applies it before first paint. Adding a theme means
+  three places: a block in `index.css`, an entry in `THEMES`, and the regex in
+  that inline script.
+- **`dark:` follows the theme, not the OS** (`@custom-variant dark` keyed on
+  `html[data-scheme]`). It's only still used for the semantic warning/error
+  colours (amber/red/emerald); everything else uses tokens. Tailwind's
+  `neutral-*` ramp is remapped per scheme onto the tokens as a safety net, so
+  a stray `bg-neutral-900` still lands on a theme surface.
+- **Category colours and icons** come from `lib/categoryStyle.ts`: a fixed
+  colour index + icon per built-in category, a name hash for household-added
+  ones, drawn from the 12-colour `--cat-N` palette (two sets, one per scheme).
+  Icons are the stroke set in `components/Icon.tsx` — no emoji as glyphs.
+- **Five tabs**: Home `/`, Insights `/reports`, Add `/add` (centre button),
+  Receipts `/receipts`, You `/settings`. The route paths kept their
+  pre-redesign names; only the labels changed.
+- **Every figure drills down.** Insights is month -> category -> merchant ->
+  receipt: `/reports?m=2026-11` (or `m=all`) -> `/reports/category/:category?month=`
+  (`All` = every spending category, i.e. top merchants) ->
+  `/reports/merchant/:merchant?month=&category=` -> `/receipts/:id` (read-only;
+  Edit is one tap further at `/receipts/:id/edit`). All four levels filter the
+  same receipt list through `lib/insights.ts`, so a total always equals the
+  sum of the level below it — put new grouping maths there, not in a page.
+- **A drill-down list's view and sort live in the URL** (`?view=date&sort=oldest`
+  on the category page, `?sort=` on the merchant page), not in component
+  state: opening a receipt unmounts the page, and state would reset to "By
+  merchant" on the way back. The sort options and the sorting itself are in
+  `lib/insights.ts` (`MERCHANT_SORTS`/`DAY_SORTS`/`RECEIPT_SORTS`).
+- **Breadcrumb trail** (`lib/trail.ts`): each link down a level passes the
+  trail so far in router state, and `PageHeader` renders it as chips. When the
+  trail came from state every chip is a real history entry, so a chip *pops*
+  (`navigate(-n)`) rather than pushing; on a deep link it falls back to a
+  derived trail and replaces. Sideways moves on a drill-down page (changing
+  month) must `replace` and carry the state along, or the chip counts go wrong.
+- **Money** goes through `lib/format.ts`'s `formatMoney`: whole units for
+  totals, `{ cents: true }` for a single receipt, bare symbol unless the
+  currency itself is the point (`{ code: true }`).
+- **"Talk to me" has one entry point per screen**, all with the accessible
+  name "Talk to me — ask about your spending": the Ask bar on Home
+  (`AskBar.tsx`), the floating Ask button on Insights and Receipts
+  (`TalkToMe.tsx`), nothing elsewhere.
+- **The app name is a logotype** (`components/Wordmark.tsx`): "bill" plus
+  "Skills" in a tilted accent block, with `aria-label="Bill Skills"`.
 
 ## PWA / build conventions
 
@@ -657,7 +717,7 @@ Current secrets per function:
   exists, and update `LLM_MODEL` — or configure `FALLBACK_LLM_API_URL`/
   `FALLBACK_LLM_API_KEY`/`FALLBACK_LLM_MODEL` so a repeat of this fails over
   automatically instead of going down completely. Stuck `sms_inbox` rows
-  from an outage like this recover via Settings → SMS → View processing
+  from an outage like this recover via You → SMS → View processing
   log's "Retry all," not by re-forwarding anything.
 
 ## Ad-hoc analysis (`notebooks/`)
@@ -686,3 +746,13 @@ duplicate check and created duplicates that had to be cleaned up again.
   conversion, category lists, duplicate detection), check whether the other
   copies need the same fix — there is no shared module between the Edge
   Functions, so drift is the default failure mode, not the exception.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on pras680/expense-manager (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

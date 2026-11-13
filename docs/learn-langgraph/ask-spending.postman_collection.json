@@ -1,0 +1,454 @@
+{
+  "info": {
+    "_postman_id": "25ad52a7-4b52-480c-88e9-928b0165d2a4",
+    "name": "Expense Manager - ask-spending",
+    "description": "Test the ask-spending LangGraph agent.\n\n1. Fill `email` and `password` (Variables tab; don't commit them).\n2. Send '0. Sign in' \u2014 it saves `access_token` automatically (valid ~1 hour; re-run when you get 401).\n3. Send any question. Open the Postman Console (bottom bar) to see the reply, rounds and each tool call.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "supabase_url",
+      "value": "https://lxxetltpuuwjtxmeemhx.supabase.co"
+    },
+    {
+      "key": "anon_key",
+      "value": "sb_publishable_7jF_NW4pRe8y6T-mFrLtew_9VtCke9e"
+    },
+    {
+      "key": "email",
+      "value": ""
+    },
+    {
+      "key": "password",
+      "value": ""
+    },
+    {
+      "key": "access_token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Sign in (saves access_token)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "apikey",
+            "value": "{{anon_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": "{{supabase_url}}/auth/v1/token?grant_type=password"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('signed in', () => pm.response.to.have.status(200));",
+              "const t = pm.response.json().access_token;",
+              "if (t) { pm.collectionVariables.set('access_token', t); console.log('access_token saved'); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stage 3 \u2014 single lookup",
+      "item": [
+        {
+          "name": "Groceries last month",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{anon_key}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How much did I spend on groceries last month?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{supabase_url}}/functions/v1/ask-spending",
+            "description": "Expect 1 round: spending_by_category for the whole previous month."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.reply) console.log('REPLY:', b.reply);",
+                  "if (b.rounds !== undefined) console.log('ROUNDS:', b.rounds);",
+                  "(b.tool_calls || []).forEach(t => console.log(`round ${t.round}: ${t.tool}`, JSON.stringify(t.args), t.error ? 'ERROR: ' + t.error : ''));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Top merchants this month",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{anon_key}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Top 5 merchants this month\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{supabase_url}}/functions/v1/ask-spending",
+            "description": "Expect top_merchants from the 1st to today."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.reply) console.log('REPLY:', b.reply);",
+                  "if (b.rounds !== undefined) console.log('ROUNDS:', b.rounds);",
+                  "(b.tool_calls || []).forEach(t => console.log(`round ${t.round}: ${t.tool}`, JSON.stringify(t.args), t.error ? 'ERROR: ' + t.error : ''));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Last credit card bill",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{anon_key}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"When did I last pay my credit card bill?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{supabase_url}}/functions/v1/ask-spending",
+            "description": "Expect find_receipts (it includes card-bill payments, which totals exclude)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.reply) console.log('REPLY:', b.reply);",
+                  "if (b.rounds !== undefined) console.log('ROUNDS:', b.rounds);",
+                  "(b.tool_calls || []).forEach(t => console.log(`round ${t.round}: ${t.tool}`, JSON.stringify(t.args), t.error ? 'ERROR: ' + t.error : ''));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Stage 3 \u2014 multi-step (the loop)",
+      "item": [
+        {
+          "name": "Cheese pizza, last 2 months",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{anon_key}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"How many times have I eaten cheese pizza in the last 2 months?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{supabase_url}}/functions/v1/ask-spending",
+            "description": "search_purchased_items; may retry with a variant if nothing matches."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.reply) console.log('REPLY:', b.reply);",
+                  "if (b.rounds !== undefined) console.log('ROUNDS:', b.rounds);",
+                  "(b.tool_calls || []).forEach(t => console.log(`round ${t.round}: ${t.tool}`, JSON.stringify(t.args), t.error ? 'ERROR: ' + t.error : ''));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Compare Sep vs Oct groceries",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{anon_key}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Compare my grocery spend in September and October, and name the top grocery merchant in October\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{supabase_url}}/functions/v1/ask-spending",
+            "description": "Expect 2+ tool calls, possibly across rounds."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.reply) console.log('REPLY:', b.reply);",
+                  "if (b.rounds !== undefined) console.log('ROUNDS:', b.rounds);",
+                  "(b.tool_calls || []).forEach(t => console.log(`round ${t.round}: ${t.tool}`, JSON.stringify(t.args), t.error ? 'ERROR: ' + t.error : ''));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dining vs groceries",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{anon_key}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What did I spend more on last month, dining or groceries, and where?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{supabase_url}}/functions/v1/ask-spending",
+            "description": "Expect a category lookup, then merchants."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.reply) console.log('REPLY:', b.reply);",
+                  "if (b.rounds !== undefined) console.log('ROUNDS:', b.rounds);",
+                  "(b.tool_calls || []).forEach(t => console.log(`round ${t.round}: ${t.tool}`, JSON.stringify(t.args), t.error ? 'ERROR: ' + t.error : ''));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Edge cases",
+      "item": [
+        {
+          "name": "Off-topic (no tools)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{anon_key}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What's the capital of France?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{supabase_url}}/functions/v1/ask-spending",
+            "description": "Expect rounds: 0 and no tool_calls."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.reply) console.log('REPLY:', b.reply);",
+                  "if (b.rounds !== undefined) console.log('ROUNDS:', b.rounds);",
+                  "(b.tool_calls || []).forEach(t => console.log(`round ${t.round}: ${t.tool}`, JSON.stringify(t.args), t.error ? 'ERROR: ' + t.error : ''));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Follow-up (no memory yet)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "apikey",
+                "value": "{{anon_key}}"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"And the month before?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{supabase_url}}/functions/v1/ask-spending",
+            "description": "Stage 4 fixes this: today the agent has no idea what 'the month' refers to."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "if (b.reply) console.log('REPLY:', b.reply);",
+                  "if (b.rounds !== undefined) console.log('ROUNDS:', b.rounds);",
+                  "(b.tool_calls || []).forEach(t => console.log(`round ${t.round}: ${t.tool}`, JSON.stringify(t.args), t.error ? 'ERROR: ' + t.error : ''));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
