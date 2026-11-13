@@ -3,13 +3,16 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { useReceipts } from '../hooks/useReceipts'
 import { useSettings } from '../hooks/useSettings'
 import { formatMoney, plural } from '../lib/format'
-import { ALL_CATEGORIES, ALL_TIME, inPeriod, monthTotals, receiptCategory, recentMonthKeys, sameMerchant, sumTotals } from '../lib/insights'
+import {
+  ALL_CATEGORIES, ALL_TIME, RECEIPT_SORTS, inPeriod, monthTotals, readSort, receiptCategory, recentMonthKeys,
+  sameMerchant, sortReceipts, sumTotals
+} from '../lib/insights'
 import { isMonthKey, periodLabel, periodShortLabel, readPeriod } from '../lib/period'
 import { extendTrail, useTrail } from '../lib/trail'
 import { PageHeader } from '../components/PageHeader'
 import { MonthBars } from '../components/MonthBars'
 import { ReceiptCard } from '../components/ReceiptCard'
-import { Card, Chip, EmptyState, GroupLabel } from '../components/ui'
+import { Card, Chip, EmptyState, SortSelect } from '../components/ui'
 
 // Third level of the drill-down: one merchant's receipts in a period. With
 // ?category= it's that merchant within one category (how it was reached from
@@ -21,6 +24,7 @@ export function MerchantPage() {
   const [params, setParams] = useSearchParams()
   const period = readPeriod(params.get('month'))
   const category = params.get('category')
+  const sort = readSort(params.get('sort'), RECEIPT_SORTS)
   const { receipts } = useReceipts()
   const { defaultCurrency } = useSettings()
 
@@ -35,7 +39,7 @@ export function MerchantPage() {
     () => receipts.filter((r) => sameMerchant(r, merchant) && (!category || receiptCategory(r) === category)),
     [receipts, merchant, category]
   )
-  const rows = useMemo(() => inPeriod(atMerchant, period), [atMerchant, period])
+  const rows = useMemo(() => sortReceipts(inPeriod(atMerchant, period), sort), [atMerchant, period, sort])
   const total = useMemo(() => sumTotals(rows), [rows])
 
   const bars = useMemo(() => {
@@ -49,11 +53,14 @@ export function MerchantPage() {
     return recentMonthKeys(6, anchor).map((key) => ({ key, total: byKey.get(key) ?? 0 }))
   }, [atMerchant, period])
 
-  function selectPeriod(next: string) {
-    const nextParams: Record<string, string> = { month: next }
-    if (category) nextParams.category = category
-    setParams(nextParams, { replace: true, state: trail.fromHistory ? { trail: trail.crumbs } : null })
+  // Sideways moves (period, sort): replace the history entry and keep the
+  // trail that was handed to this page.
+  function update(patch: Record<string, string>) {
+    const next = new URLSearchParams(params)
+    for (const [key, value] of Object.entries(patch)) next.set(key, value)
+    setParams(next, { replace: true, state: trail.fromHistory ? { trail: trail.crumbs } : null })
   }
+  const selectPeriod = (next: string) => update({ month: next })
 
   const down = extendTrail(trail, {
     label: merchant,
@@ -91,7 +98,10 @@ export function MerchantPage() {
         <EmptyState>No receipts from {merchant} in this period.</EmptyState>
       ) : (
         <>
-          <GroupLabel>Receipts</GroupLabel>
+          <div className="flex items-center gap-2">
+            <h2 className="px-1 font-display text-lg font-semibold tracking-tight text-ink">Receipts</h2>
+            <SortSelect value={sort} onChange={(value) => update({ sort: value })} options={RECEIPT_SORTS} />
+          </div>
           <div className="flex flex-col gap-1.5">
             {rows.map((r) => <ReceiptCard key={r.id} receipt={r} linkState={down} />)}
           </div>

@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useReceipts } from '../hooks/useReceipts'
 import { useSettings } from '../hooks/useSettings'
 import { isExpenseReceipt } from '../lib/receiptShape'
 import { isExpenseCategory } from '../lib/categories'
-import { formatMoney, plural } from '../lib/format'
+import { dayLabel, formatMoney, plural } from '../lib/format'
 import {
-  ALL_CATEGORIES, ALL_TIME, byMerchant, inPeriod, monthTotals, receiptCategory, recentMonthKeys, sumTotals
+  ALL_CATEGORIES, ALL_TIME, DAY_SORTS, MERCHANT_SORTS, byDay, byMerchant, inPeriod, monthTotals, readSort,
+  receiptCategory, recentMonthKeys, sortSlices, sumTotals
 } from '../lib/insights'
 import { isMonthKey, periodLabel, periodShortLabel, readPeriod } from '../lib/period'
 import { extendTrail, useTrail } from '../lib/trail'
@@ -14,14 +15,17 @@ import { PageHeader } from '../components/PageHeader'
 import { MonthBars } from '../components/MonthBars'
 import { CategoryIcon } from '../components/CategoryIcon'
 import { ReceiptCard } from '../components/ReceiptCard'
-import { Card, CardTitle, Chip, EmptyState } from '../components/ui'
+import { Card, CardTitle, Chip, EmptyState, SortSelect } from '../components/ui'
 import { Icon } from '../components/Icon'
 
 // Second level of the Insights drill-down: one category in one period, split
-// by merchant (or listed receipt by receipt). The path segment "All" means
-// every spending category at once — the "Top merchants" view.
+// by merchant or laid out day by day. The path segment "All" means every
+// spending category at once — the "Top merchants" view.
+//
+// Period, view and sort all live in the URL (?month=&view=&sort=), so opening
+// a receipt and coming back restores exactly the list that was left.
 
-type View = 'merchants' | 'receipts'
+type View = 'merchants' | 'date'
 
 export function CategoryPage() {
   const { category: rawCategory } = useParams<{ category: string }>()
@@ -31,7 +35,11 @@ export function CategoryPage() {
   const period = readPeriod(params.get('month'))
   const { receipts } = useReceipts()
   const { defaultCurrency } = useSettings()
-  const [view, setView] = useState<View>('merchants')
+  const view: View = params.get('view') === 'date' ? 'date' : 'merchants'
+  // Each view has its own sort options; a value left over from the other
+  // view just falls back to this one's default.
+  const merchantSort = readSort(params.get('sort'), MERCHANT_SORTS)
+  const daySort = readSort(params.get('sort'), DAY_SORTS)
 
   const insightsHref = isMonthKey(period) ? `/reports?m=${period}` : `/reports?m=${ALL_TIME}`
   const trail = useTrail([{ label: periodShortLabel(period), to: insightsHref }])
@@ -45,7 +53,8 @@ export function CategoryPage() {
   )
   const rows = useMemo(() => inPeriod(inCategory, period), [inCategory, period])
   const total = useMemo(() => sumTotals(rows), [rows])
-  const merchants = useMemo(() => byMerchant(rows), [rows])
+  const merchants = useMemo(() => sortSlices(byMerchant(rows), merchantSort), [rows, merchantSort])
+  const days = useMemo(() => byDay(rows, daySort), [rows, daySort])
 
   // Share of the period's spend — only meaningful for a spending category.
   const share = useMemo(() => {
@@ -67,14 +76,25 @@ export function CategoryPage() {
     return recentMonthKeys(6, anchor).map((key) => ({ key, total: byKey.get(key) ?? 0 }))
   }, [inCategory, period])
 
-  // Sideways move: replace, and keep the trail that was handed to this page.
-  function selectPeriod(next: string) {
-    setParams({ month: next }, { replace: true, state: trail.fromHistory ? { trail: trail.crumbs } : null })
+  // Sideways moves (period, view, sort): replace the history entry and keep
+  // the trail that was handed to this page, so back still leaves in one step.
+  function update(patch: Record<string, string | null>) {
+    const next = new URLSearchParams(params)
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) next.delete(key)
+      else next.set(key, value)
+    }
+    setParams(next, { replace: true, state: trail.fromHistory ? { trail: trail.crumbs } : null })
   }
+  const selectPeriod = (next: string) => update({ month: next })
+  // Switching view drops the sort: the two views don't share sort options.
+  const selectView = (next: View) => update({ view: next === 'merchants' ? null : next, sort: null })
 
   const here = {
     label: isAll ? 'Top merchants' : category,
-    to: `/reports/category/${encodeURIComponent(category)}?month=${period}`
+    // Includes the current view and sort, so a deep-linked receipt's crumb
+    // leads back to the same list.
+    to: `/reports/category/${encodeURIComponent(category)}?${new URLSearchParams({ ...Object.fromEntries(params), month: period })}`
   }
   const down = extendTrail(trail, here)
   const spendNote = !isAll && !isExpenseCategory(category) ? ' · not counted as spend' : ''
@@ -113,13 +133,18 @@ export function CategoryPage() {
         </div>
       </Card>
 
-      <div className="flex gap-2">
-        <Chip active={view === 'merchants'} onClick={() => setView('merchants')}>By merchant</Chip>
-        <Chip active={view === 'receipts'} onClick={() => setView('receipts')}>Every receipt</Chip>
+      <div className="flex items-center gap-2">
+        <Chip active={view === 'merchants'} onClick={() => selectView('merchants')}>By merchant</Chip>
+        <Chip active={view === 'date'} onClick={() => selectView('date')}>By date</Chip>
+        {view === 'merchants' ? (
+          <SortSelect value={merchantSort} onChange={(sort) => update({ sort })} options={MERCHANT_SORTS} />
+        ) : (
+          <SortSelect value={daySort} onChange={(sort) => update({ sort })} options={DAY_SORTS} />
+        )}
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState>Nothing here in {periodLabel(period).toLowerCase() === 'all time' ? 'your receipts yet' : periodLabel(period)}.</EmptyState>
+        <EmptyState>Nothing here in {period === ALL_TIME ? 'your receipts yet' : periodLabel(period)}.</EmptyState>
       ) : view === 'merchants' ? (
         <Card className="px-[18px] pt-2 pb-2">
           <CardTitle>{isAll ? 'Top merchants' : 'Merchants'}</CardTitle>
@@ -143,9 +168,15 @@ export function CategoryPage() {
           ))}
         </Card>
       ) : (
-        <div className="flex flex-col gap-1.5">
-          {rows.map((r) => <ReceiptCard key={r.id} receipt={r} linkState={down} />)}
-        </div>
+        days.map((day) => (
+          <section key={day.key ?? 'no-date'} className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between px-1 pt-1 text-[13px] text-muted">
+              <h2 className="font-medium">{day.key ? dayLabel(day.key) : 'No date'}</h2>
+              <span>{formatMoney(day.total, defaultCurrency, { cents: true })}</span>
+            </div>
+            {day.rows.map((r) => <ReceiptCard key={r.id} receipt={r} showDate={false} linkState={down} />)}
+          </section>
+        ))
       )}
     </div>
   )

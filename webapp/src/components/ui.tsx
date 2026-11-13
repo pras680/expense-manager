@@ -77,6 +77,38 @@ export function Chip({ active, onClick, children }: ChipProps) {
   )
 }
 
+interface SortSelectProps<T extends string> {
+  value: T
+  onChange: (value: T) => void
+  options: { value: T; label: string }[]
+}
+
+/**
+ * The sort control that sits at the end of a row of view chips. A native
+ * <select> under a pill: on a phone that opens the system picker, which beats
+ * any custom menu for a list of four options.
+ */
+export function SortSelect<T extends string>({ value, onChange, options }: SortSelectProps<T>) {
+  return (
+    <label className="relative ml-auto flex h-11 shrink-0 items-center gap-1.5 rounded-full bg-card pr-3.5 pl-3 text-sm font-medium text-ink focus-within:ring-2 focus-within:ring-accent">
+      <Icon name="sort" size={16} className="text-muted" />
+      <span>{options.find((o) => o.value === value)?.label}</span>
+      {/* Invisible but full-size, so the whole pill is the tap target and
+          the visible label can be shorter than the widest option. */}
+      <select
+        aria-label="Sort by"
+        value={value}
+        onChange={(e) => onChange(e.target.value as T)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 type NoticeTone = 'warn' | 'error' | 'ok' | 'info'
 
 const NOTICE_TONE: Record<NoticeTone, string> = {

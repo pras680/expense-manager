@@ -41,10 +41,35 @@ test('a total drills down to a single receipt, and the trail leads back up', asy
   await expect(page).toHaveURL('/reports?m=all')
 })
 
-test('a category page can list every receipt instead of merchants', async ({ page }) => {
+test('a category page can be laid out by date instead of by merchant', async ({ page }) => {
   await openApp(page, '/reports/category/Groceries?month=all')
-  await page.getByRole('button', { name: 'Every receipt' }).click()
+  await page.getByRole('button', { name: 'By date' }).click()
+  // The view lives in the URL, so opening a receipt and coming back restores it.
+  await expect(page).toHaveURL(/view=date/)
+  await expect(page.getByRole('heading', { level: 2 }).first()).toBeVisible()
   await expect(page.locator('a[href^="/receipts/"]').first()).toBeVisible()
+
+  await page.locator('a[href^="/receipts/"]').first().click()
+  await expect(page).toHaveURL(/\/receipts\/[^/]+$/)
+  await page.goBack()
+  await expect(page.getByRole('button', { name: 'By date' })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('the sort control reorders the list and is remembered in the URL', async ({ page }) => {
+  await openApp(page, '/reports/category/All?month=all')
+  const names = () => page.locator('a[href^="/reports/merchant/"] span.truncate').allTextContents()
+  await page.getByLabel('Sort by').selectOption('name')
+  await expect(page).toHaveURL(/sort=name/)
+  // Polled: the list re-renders just after the URL changes.
+  const inOrder = (list: string[]) =>
+    list.length > 1 && list.every((n, i) => i === 0 || list[i - 1].localeCompare(n, undefined, { sensitivity: 'base' }) <= 0)
+  await expect.poll(async () => inOrder(await names())).toBe(true)
+
+  // The date view has its own options; switching view resets to its default.
+  await page.getByRole('button', { name: 'By date' }).click()
+  await expect(page.getByLabel('Sort by')).toHaveValue('newest')
+  await page.getByLabel('Sort by').selectOption('oldest')
+  await expect(page).toHaveURL(/sort=oldest/)
 })
 
 test('transfers are listed apart from spending', async ({ page }) => {
