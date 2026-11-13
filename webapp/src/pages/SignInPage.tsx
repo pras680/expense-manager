@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
+import { Wordmark } from '../components/Wordmark'
 
 export function SignInPage({ onRegister }: { onRegister: () => void }) {
   const { signIn, expiredMessage } = useAuth()
@@ -27,46 +28,46 @@ export function SignInPage({ onRegister }: { onRegister: () => void }) {
       style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <div className="mx-auto w-full max-w-sm">
-        <h1 className="text-center text-2xl font-bold text-neutral-900 dark:text-neutral-50">Bill Skills</h1>
-        <p className="mt-1 text-center text-sm text-neutral-500 dark:text-neutral-400">
-          Sign in with your household account.
+        <Wordmark as="h1" size="lg" />
+        <p className="mt-4 text-[15px] text-muted">
+          Every receipt in the household, in one place. Sign in to pick up where you left off.
         </p>
 
         {/* Explains an involuntary sign-out, rather than silently dumping the
             user back here with no idea why their session ended. */}
         {expiredMessage && !error && (
-          <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          <div className="mt-4 rounded-2xl bg-amber-100 px-4 py-3 text-sm text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">
             {expiredMessage}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
           {error && (
-            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+            <div role="alert" className="rounded-2xl bg-red-100 px-4 py-3 text-sm text-red-800 dark:bg-red-500/15 dark:text-red-200">
               {error}
             </div>
           )}
 
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Email</span>
+          <label className="flex flex-col gap-1.5">
+            <span className="px-1 text-[13px] font-medium text-muted">Email</span>
             <input
               type="email"
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+              className="field"
               required
             />
           </label>
 
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Password</span>
+          <label className="flex flex-col gap-1.5">
+            <span className="px-1 text-[13px] font-medium text-muted">Password</span>
             <input
               type="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+              className="field"
               required
             />
           </label>
@@ -74,7 +75,7 @@ export function SignInPage({ onRegister }: { onRegister: () => void }) {
           <button
             type="submit"
             disabled={busy}
-            className="mt-2 rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+            className="mt-2 min-h-14 rounded-full bg-accent text-base font-semibold text-on-accent disabled:opacity-60 active:opacity-80"
           >
             {busy ? 'Signing in…' : 'Sign In'}
           </button>
@@ -83,7 +84,7 @@ export function SignInPage({ onRegister }: { onRegister: () => void }) {
         <button
           type="button"
           onClick={onRegister}
-          className="mt-4 w-full text-center text-sm text-accent-700 dark:text-accent-400"
+          className="mt-3 min-h-11 w-full text-center text-sm font-medium text-ink underline decoration-accent decoration-2 underline-offset-4"
         >
           New here? Create an account
         </button>

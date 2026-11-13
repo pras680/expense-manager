@@ -32,15 +32,47 @@ function sessionFromResponse(resp: TokenResponse, fallbackRefreshToken?: string)
   }
 }
 
-async function requestToken(grantType: 'password' | 'refresh_token', body: Record<string, string>): Promise<TokenResponse> {
-  const resp = await fetch(`${env.supabaseUrl}/auth/v1/token?grant_type=${grantType}`, {
+// How long a user-initiated sign-in/registration waits before giving up.
+// Without this a stalled connection leaves the button on "Signing in…" forever.
+const USER_ACTION_TIMEOUT_MS = 20_000
+
+/**
+ * fetch for requests the user is actively waiting on: bounded by a timeout,
+ * and network failures/timeouts become a readable message instead of the
+ * browser's raw "Failed to fetch" / "Load failed".
+ *
+ * Deliberately NOT used for background token refresh — any refresh failure
+ * ends the session there, so a timeout would turn a slow network into a
+ * forced sign-out.
+ */
+async function userActionFetch(url: string, init: RequestInit, timeoutMessage: string): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(USER_ACTION_TIMEOUT_MS) })
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+      throw new Error(timeoutMessage)
+    }
+    throw new Error("Couldn't reach the server. Check your connection and try again.")
+  }
+}
+
+async function requestToken(
+  grantType: 'password' | 'refresh_token',
+  body: Record<string, string>,
+  opts: { userAction?: boolean } = {}
+): Promise<TokenResponse> {
+  const url = `${env.supabaseUrl}/auth/v1/token?grant_type=${grantType}`
+  const init: RequestInit = {
     method: 'POST',
     headers: {
       apikey: env.supabaseAnonKey,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(body)
-  })
+  }
+  const resp = opts.userAction
+    ? await userActionFetch(url, init, 'Signing in is taking too long. Check your connection and try again.')
+    : await fetch(url, init)
   if (!resp.ok) {
     const errBody = await resp.text()
     let message = 'Sign in failed'
@@ -70,7 +102,7 @@ export async function registerAndSignIn(input: {
   householdName: string
   inviteCode: string
 }): Promise<Session> {
-  const resp = await fetch(`${env.supabaseUrl}/functions/v1/register-user`, {
+  const resp = await userActionFetch(`${env.supabaseUrl}/functions/v1/register-user`, {
     method: 'POST',
     headers: {
       apikey: env.supabaseAnonKey,
@@ -84,7 +116,7 @@ export async function registerAndSignIn(input: {
       household_name: input.householdName,
       invite_code: input.inviteCode
     })
-  })
+  }, 'Registration is taking too long. It may still have gone through — try signing in before registering again.')
   const data = await resp.json().catch(() => ({}))
   if (!resp.ok) {
     throw new Error(data?.error ?? `Registration failed (HTTP ${resp.status})`)
@@ -93,7 +125,7 @@ export async function registerAndSignIn(input: {
 }
 
 export async function signInWithPassword(email: string, password: string): Promise<Session> {
-  const resp = await requestToken('password', { email: email.trim(), password })
+  const resp = await requestToken('password', { email: email.trim(), password }, { userAction: true })
   const session = sessionFromResponse(resp)
   saveSession(session)
   return session
