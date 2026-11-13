@@ -14,8 +14,8 @@ export default defineConfig({
         name: 'Bill Skills',
         short_name: 'Bill Skills',
         description: 'Family expense tracker',
-        theme_color: '#ec3013',
-        background_color: '#ffffff',
+        theme_color: '#0b0c10',
+        background_color: '#0b0c10',
         display: 'standalone',
         start_url: '/',
         icons: [

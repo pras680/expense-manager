@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="midnight" data-scheme="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
@@ -7,13 +7,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="theme-color" content="#ec3013" />
-    <!-- Archivo (the Modernist design system's poster-style redesign,
-         originally scoped to the Home landing page) is now the app-wide
-         font — see index.css. -->
+    <meta name="theme-color" content="#0b0c10" />
+    <!-- Applies the stored theme before the first paint, so the page never
+         flashes the default theme on the way to the chosen one. The key and
+         the light-theme list mirror src/lib/theme.ts; an unknown value just
+         leaves the default attributes above in place. -->
+    <script>
+      try {
+        var t = localStorage.getItem('billskills.theme')
+        if (t && /^(midnight|ember|ocean|orchid|paper|sorbet)$/.test(t)) {
+          document.documentElement.dataset.theme = t
+          document.documentElement.dataset.scheme = t === 'paper' || t === 'sorbet' ? 'light' : 'dark'
+        }
+      } catch (e) {}
+    </script>
+    <!-- Space Grotesk for headings and figures, Inter for everything else
+         (see the font tokens in src/index.css). -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
     <title>Bill Skills</title>
   </head>
   <body>

@@ -147,46 +147,46 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-4">
       {error && (
-        <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div className="rounded-2xl bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           {error}
         </div>
       )}
 
-      <label className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+      <label className="flex flex-col gap-1.5">
+        <span className="px-1 text-[13px] font-medium text-muted">
           {isTransfer ? 'Recipient' : 'Merchant'}
         </span>
         <input
           type="text"
           value={values.merchant}
           onChange={(e) => set('merchant', e.target.value)}
-          className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+          className="field"
           placeholder={isTransfer ? 'e.g. John Tan, or self' : 'e.g. Starbucks'}
           required
         />
       </label>
 
       <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Amount</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="px-1 text-[13px] font-medium text-muted">Amount</span>
           <input
             type="number"
             inputMode="decimal"
             step="0.01"
             value={values.receiptAmount}
             onChange={(e) => set('receiptAmount', e.target.value)}
-            className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+            className="field"
             placeholder="0.00"
             required
           />
         </label>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Currency</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="px-1 text-[13px] font-medium text-muted">Currency</span>
           <select
             value={values.receiptCurrency}
             onChange={(e) => set('receiptCurrency', e.target.value)}
-            className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+            className="field"
           >
             {COMMON_CURRENCIES.map((c) => (
               <option key={c} value={c}>{c}</option>
@@ -195,61 +195,61 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
         </label>
       </div>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Date</span>
+      <label className="flex flex-col gap-1.5">
+        <span className="px-1 text-[13px] font-medium text-muted">Date</span>
         <input
           type="date"
           value={values.date || todayISODate()}
           onChange={(e) => set('date', e.target.value)}
-          className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+          className="field"
         />
       </label>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Category</span>
+      <label className="flex flex-col gap-1.5">
+        <span className="px-1 text-[13px] font-medium text-muted">Category</span>
         <select
           value={values.category}
           onChange={(e) => set('category', e.target.value)}
-          className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+          className="field"
         >
           {categoryOptions.map((c) => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
         {isTransfer && (
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Local transfers aren't counted in your monthly spending — they show up separately in Reports.
+          <p className="px-1 text-[13px] text-muted">
+            Local transfers aren't counted in your monthly spending — they show up separately in Insights.
           </p>
         )}
       </label>
 
       {isTransfer && (
-        <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900/50">
-          <span className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">Transfer details</span>
+        <div className="flex flex-col gap-3 rounded-3xl bg-card p-4">
+          <span className="text-sm font-semibold text-ink">Transfer details</span>
           <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">From bank</span>
+            <label className="flex flex-col gap-1.5">
+              <span className="px-1 text-[13px] font-medium text-muted">From bank</span>
               <input
                 type="text"
                 value={values.transferFromBank}
                 onChange={(e) => set('transferFromBank', e.target.value)}
-                className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+                className="field"
                 placeholder="e.g. DBS"
               />
             </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">To bank</span>
+            <label className="flex flex-col gap-1.5">
+              <span className="px-1 text-[13px] font-medium text-muted">To bank</span>
               <input
                 type="text"
                 value={values.transferToBank}
                 onChange={(e) => set('transferToBank', e.target.value)}
-                className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+                className="field"
                 placeholder="e.g. OCBC"
               />
             </label>
           </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Transfer type</span>
+          <div className="flex flex-col gap-1.5">
+            <span className="px-1 text-[13px] font-medium text-muted">Transfer type</span>
             <div className="flex gap-2">
               {TRANSFER_KINDS.map((kind) => (
                 <button
@@ -257,17 +257,17 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
                   type="button"
                   onClick={() => set('transferKind', kind)}
                   aria-pressed={values.transferKind === kind}
-                  className={`flex-1 rounded-lg py-2.5 text-sm font-medium capitalize ${
+                  className={`min-h-12 flex-1 rounded-full text-sm font-semibold capitalize ${
                     values.transferKind === kind
-                      ? 'bg-accent-700 text-white'
-                      : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+                      ? 'bg-accent text-on-accent'
+                      : 'bg-card text-ink'
                   }`}
                 >
                   {kind}
                 </button>
               ))}
             </div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="px-1 text-[13px] text-muted">
               Self = between your own accounts. External = to someone else's account.
             </p>
           </div>
@@ -275,8 +275,8 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Card last 4</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="px-1 text-[13px] font-medium text-muted">Card last 4</span>
           <input
             type="text"
             inputMode="numeric"
@@ -284,68 +284,68 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
             value={values.cardLast4}
             onChange={(e) => set('cardLast4', e.target.value)}
             onBlur={handleCardLast4Blur}
-            className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+            className="field"
             placeholder="1234"
           />
         </label>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Bank</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="px-1 text-[13px] font-medium text-muted">Bank</span>
           <input
             type="text"
             value={values.cardBank}
             onChange={(e) => set('cardBank', e.target.value)}
-            className="rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+            className="field"
             placeholder="Optional"
           />
         </label>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Raw extracted text</span>
+      <div className="flex flex-col gap-1.5">
+        <span className="px-1 text-[13px] font-medium text-muted">Raw extracted text</span>
         {values.rawText ? (
           <textarea
             readOnly
             value={values.rawText}
             rows={6}
-            className="rounded-lg border border-neutral-300 bg-neutral-50 px-3 py-2.5 font-mono text-xs text-neutral-700 dark:border-neutral-700 dark:bg-neutral-900/60 dark:text-neutral-300"
+            className="rounded-2xl border border-line bg-card-2 px-3 py-2.5 font-mono text-xs text-ink"
           />
         ) : (
-          <p className="rounded-lg border border-dashed border-neutral-300 px-3 py-2.5 text-xs text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+          <p className="rounded-2xl border border-dashed border-line px-3 py-2.5 text-xs text-muted">
             No source text for this receipt — it was entered manually.
           </p>
         )}
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="px-1 text-[13px] text-muted">
           What the SMS, email, or photo actually said — check the fields above against this before saving.
         </p>
       </div>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Comment</span>
+      <label className="flex flex-col gap-1.5">
+        <span className="px-1 text-[13px] font-medium text-muted">Comment</span>
         <textarea
           value={values.comment}
           onChange={(e) => set('comment', e.target.value)}
           rows={2}
           placeholder="How these values were derived — add your own notes here"
-          className="rounded-lg border border-neutral-300 px-3 py-2.5 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+          className="field text-sm"
         />
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="px-1 text-[13px] text-muted">
           Auto-filled with the parser's reasoning; edit freely. Saving with a changed field or a note here helps
           future receipts from this merchant get parsed correctly.
         </p>
       </label>
 
-      <div className="flex flex-col gap-1">
-        <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Visibility</span>
+      <div className="flex flex-col gap-1.5">
+        <span className="px-1 text-[13px] font-medium text-muted">Visibility</span>
         <div className="flex gap-2">
           <button
             type="button"
             onClick={() => set('visibility', 'household')}
             aria-pressed={values.visibility === 'household'}
-            className={`flex-1 rounded-lg py-2.5 text-sm font-medium ${
+            className={`min-h-12 flex-1 rounded-full text-sm font-semibold ${
               values.visibility === 'household'
-                ? 'bg-accent-700 text-white'
-                : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+                ? 'bg-accent text-on-accent'
+                : 'bg-card text-ink'
             }`}
           >
             Household
@@ -354,16 +354,16 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
             type="button"
             onClick={() => set('visibility', 'private')}
             aria-pressed={values.visibility === 'private'}
-            className={`flex-1 rounded-lg py-2.5 text-sm font-medium ${
+            className={`min-h-12 flex-1 rounded-full text-sm font-semibold ${
               values.visibility === 'private'
-                ? 'bg-amber-600 text-white'
-                : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
+                ? 'bg-ink text-bg'
+                : 'bg-card text-ink'
             }`}
           >
             Private
           </button>
         </div>
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="px-1 text-[13px] text-muted">
           {values.visibility === 'household'
             ? 'Everyone in your household can see and edit this receipt.'
             : 'Only you can see this receipt. It is excluded from household totals for everyone else.'}
@@ -373,7 +373,7 @@ export function ReceiptForm({ initial, defaultCurrency, submitLabel, onSubmit }:
       <button
         type="submit"
         disabled={saving}
-        className="mt-2 rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+        className="mt-2 min-h-14 rounded-full bg-accent text-base font-semibold text-on-accent disabled:opacity-60 active:opacity-80"
       >
         {saving ? 'Saving…' : submitLabel}
       </button>

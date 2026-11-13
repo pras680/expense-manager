@@ -21,7 +21,7 @@ import { compressImage, blobToBase64 } from '../lib/imageUtils'
 import { DEFAULT_CURRENCY } from '../lib/categories'
 import { SOURCE_LABELS } from '../lib/receiptShape'
 import { formatDuration } from '../lib/parserQuota'
-import { ACCENT } from '../lib/theme'
+import { Icon } from '../components/Icon'
 import type { ParsedReceipt } from '../types/receipt'
 
 const MAX_RAW_TEXT_CHARS = 18_000
@@ -93,20 +93,11 @@ function errorMessage(err: unknown): string {
 function PageTitle({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) {
   return (
     <div className="motion-safe:animate-rise">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center text-white" style={{ background: ACCENT }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-          </div>
-          <h1 className="text-[28px] font-extrabold leading-none tracking-tight text-neutral-900 dark:text-neutral-50">{title}</h1>
-        </div>
+      <div className="flex min-h-11 items-center justify-between gap-3">
+        <h1 className="font-display text-[30px] leading-none font-bold tracking-tight text-ink">{title}</h1>
         {action}
       </div>
-      <div className="mt-3 h-1.5 w-16" style={{ background: ACCENT }} />
-      {subtitle && <p className="mt-3 text-sm text-neutral-600 dark:text-neutral-400">{subtitle}</p>}
+      {subtitle && <p className="mt-2 text-[15px] text-muted">{subtitle}</p>}
     </div>
   )
 }
@@ -121,10 +112,8 @@ function ModeSwitch({ mode, onChange, disabled }: { mode: Mode; onChange: (m: Mo
         aria-selected={active}
         disabled={disabled}
         onClick={() => onChange(value)}
-        className={`flex flex-1 items-center justify-center gap-2 py-2.5 text-sm font-bold transition-colors disabled:opacity-60 ${
-          active
-            ? 'bg-accent-700 text-white'
-            : 'bg-white text-neutral-700 hover:bg-accent-50 dark:bg-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-800'
+        className={`flex min-h-11 flex-1 items-center justify-center gap-2 rounded-full text-sm font-semibold transition-colors disabled:opacity-60 ${
+          active ? 'bg-ink text-bg' : 'text-ink'
         }`}
       >
         {icon}
@@ -133,21 +122,9 @@ function ModeSwitch({ mode, onChange, disabled }: { mode: Mode; onChange: (m: Mo
     )
   }
   return (
-    <div role="tablist" aria-label="How to add" className="mt-5 flex border-2 border-accent-700 motion-safe:animate-rise">
-      {option('photo', 'Photo / PDF', (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-          <circle cx="12" cy="13" r="3" />
-        </svg>
-      ))}
-      {option('text', 'Paste text', (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="8" y="2" width="8" height="4" rx="1" />
-          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-          <path d="M9 12h6" />
-          <path d="M9 16h4" />
-        </svg>
-      ))}
+    <div role="tablist" aria-label="How to add" className="mt-4 flex gap-1 rounded-full bg-card p-1 motion-safe:animate-rise">
+      {option('photo', 'Photo / PDF', <Icon name="camera" size={16} />)}
+      {option('text', 'Paste text', <Icon name="text" size={16} />)}
     </div>
   )
 }
@@ -159,16 +136,16 @@ function HowItWorks() {
     { n: '3', title: 'You confirm', body: 'Fix anything, then save' }
   ]
   return (
-    <ol className="mt-4 grid grid-cols-3 gap-2">
+    <ol className="mt-3.5 grid grid-cols-3 gap-2.5">
       {steps.map((s, i) => (
         <li
           key={s.n}
-          className="border-t-2 border-accent-700 pt-2 motion-safe:animate-rise"
+          className="rounded-3xl bg-card p-3.5 motion-safe:animate-rise"
           style={{ animationDelay: `${120 + i * 90}ms` }}
         >
-          <div className="text-[11px] font-extrabold text-accent-700 dark:text-accent-400">{s.n}</div>
-          <div className="text-sm font-extrabold leading-tight text-neutral-900 dark:text-neutral-50">{s.title}</div>
-          <div className="mt-0.5 text-[11px] leading-snug text-neutral-500 dark:text-neutral-400">{s.body}</div>
+          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-card-2 font-display text-xs font-semibold text-ink">{s.n}</div>
+          <div className="mt-2 text-sm leading-tight font-semibold text-ink">{s.title}</div>
+          <div className="mt-1 text-xs leading-snug text-muted">{s.body}</div>
         </li>
       ))}
     </ol>
@@ -186,13 +163,13 @@ function Spinner() {
 
 function WorkingSteps({ steps, active }: { steps: string[]; active: number }) {
   return (
-    <ol className="flex flex-col gap-2" aria-live="polite">
+    <ol className="flex flex-col gap-2.5 rounded-3xl bg-card p-[18px]" aria-live="polite">
       {steps.map((label, i) => {
         const done = i < active
         const current = i === active
         return (
-          <li key={label} className={`flex items-center gap-2.5 text-sm ${current ? 'font-extrabold text-neutral-900 dark:text-neutral-50' : done ? 'text-neutral-500 dark:text-neutral-400' : 'text-neutral-400 dark:text-neutral-600'}`}>
-            <span className={`flex h-6 w-6 shrink-0 items-center justify-center ${done ? 'bg-emerald-500 text-white' : current ? 'bg-accent-700 text-white' : 'border border-neutral-300 dark:border-neutral-700'}`}>
+          <li key={label} className={`flex items-center gap-3 text-[15px] ${current ? 'font-semibold text-ink' : done ? 'text-muted' : 'text-muted'}`}>
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${done ? 'bg-card-2 text-ink' : current ? 'bg-accent text-on-accent' : 'border border-line'}`}>
               {done ? (
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M20 6 9 17l-5-5" />
@@ -209,15 +186,12 @@ function WorkingSteps({ steps, active }: { steps: string[]; active: number }) {
 
 function ScanningPreview({ src, scanning }: { src: string; scanning: boolean }) {
   return (
-    <div className="relative mx-auto w-fit overflow-hidden border border-neutral-200 dark:border-neutral-800">
+    <div className="relative mx-auto w-fit overflow-hidden rounded-2xl border border-line">
       <img src={src} alt="Receipt preview" className="block max-h-60 object-contain" />
       {scanning && (
         <>
-          <div className="pointer-events-none absolute inset-0 bg-accent-700/5" />
-          <div
-            className="pointer-events-none absolute inset-x-0 h-[3px] motion-safe:animate-scan"
-            style={{ background: ACCENT, boxShadow: `0 0 14px 3px ${ACCENT}66` }}
-          />
+          <div className="pointer-events-none absolute inset-0 bg-accent/5" />
+          <div className="pointer-events-none absolute inset-x-0 h-[3px] bg-accent shadow-[0_0_14px_3px_var(--accent)] motion-safe:animate-scan" />
         </>
       )}
     </div>
@@ -244,14 +218,14 @@ function MergeConfirmDialog({
     : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onDismiss}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center" onClick={onDismiss}>
       <div
-        className="w-full max-w-sm rounded-t-2xl bg-white p-5 sm:rounded-2xl dark:bg-neutral-900"
-        style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}
+        className="w-full max-w-sm rounded-t-[28px] bg-card p-6 sm:rounded-[28px]"
+        style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-50">Looks like a duplicate</h2>
-        <p className="mt-1.5 text-sm text-neutral-600 dark:text-neutral-400">
+        <h2 className="font-display text-lg font-semibold text-ink">Looks like a duplicate</h2>
+        <p className="mt-1.5 text-sm text-muted">
           This matches a receipt already imported via {sourceLabel}
           {duplicate.merchant ? ` for ${duplicate.merchant}` : ''}
           {dateLabel ? ` on ${dateLabel}` : ''}, still waiting for review. Merge what you just read into it, or
@@ -262,7 +236,7 @@ function MergeConfirmDialog({
             type="button"
             onClick={onMerge}
             disabled={busy}
-            className="rounded-lg bg-accent-700 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+            className="min-h-12 rounded-full bg-accent text-base font-semibold text-on-accent disabled:opacity-60"
           >
             {busy ? 'Merging…' : 'Merge into it'}
           </button>
@@ -270,7 +244,7 @@ function MergeConfirmDialog({
             type="button"
             onClick={onKeepSeparate}
             disabled={busy}
-            className="rounded-lg bg-neutral-100 py-2.5 text-sm font-medium text-neutral-800 disabled:opacity-60 dark:bg-neutral-800 dark:text-neutral-100"
+            className="min-h-12 rounded-full bg-card-2 text-base font-semibold text-ink disabled:opacity-60"
           >
             {busy ? 'Saving…' : 'Keep as a separate receipt'}
           </button>
@@ -511,18 +485,18 @@ export function AddReceiptPage() {
           title="Review"
           subtitle={parseNote ? undefined : 'Here’s what we read — check it over, then save.'}
           action={
-            <button onClick={reset} className="text-sm font-semibold text-neutral-500 dark:text-neutral-400">
+            <button onClick={reset} className="flex h-11 items-center rounded-full bg-card px-4 text-sm font-semibold text-ink">
               Start over
             </button>
           }
         />
         {parseNote && (
-          <div className="mt-3 border-l-4 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          <div className="mt-3 rounded-2xl bg-amber-100 px-4 py-3 text-sm text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">
             {parseNote}
           </div>
         )}
         {error && (
-          <div className="mt-3 border-l-4 border-accent-700 bg-accent-50 px-3 py-2 text-sm text-accent-900 dark:bg-accent-950 dark:text-accent-200">
+          <div role="alert" className="mt-3 rounded-2xl bg-red-100 px-4 py-3 text-sm text-red-800 dark:bg-red-500/15 dark:text-red-200">
             {error}
           </div>
         )}
@@ -559,27 +533,27 @@ export function AddReceiptPage() {
     return (
       <div className="px-4 pt-4 pb-6">
         <PageTitle title="Add Receipt" />
-        <div className="mt-5 p-5 text-white motion-safe:animate-rise" style={{ background: ACCENT }}>
-          <div className="text-[11px] font-bold uppercase tracking-wider text-white/80">
+        <div className="mt-4 rounded-[28px] bg-card p-[22px] motion-safe:animate-rise">
+          <div className="text-sm text-muted">
             {ready ? 'Ready to try again' : 'The reader needs a breather'}
           </div>
-          <div className="mt-2 text-[44px] font-extrabold leading-none tracking-tight tabular-nums">
+          <div className="mt-2 font-display text-[52px] leading-none font-semibold tracking-tighter text-ink tabular-nums">
             {ready ? 'Go' : formatDuration(msLeft)}
           </div>
-          <p className="mt-2 text-sm text-white/90">
+          <p className="mt-3 text-[15px] text-muted">
             {cooldown.input.kind === 'photo'
               ? 'Your photo is already uploaded. The parser’s provider is at its rate limit — retry when the timer runs out, or type the details in yourself now.'
               : 'The parser’s provider is at its rate limit — retry when the timer runs out, or type the details in yourself now.'}
           </p>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex gap-2.5">
             <button
               onClick={() => runParse(cooldown.input)}
               disabled={!ready}
-              className="flex-1 bg-white py-3 text-sm font-extrabold text-accent-800 transition-opacity disabled:opacity-50"
+              className="min-h-12 flex-1 rounded-full bg-accent text-sm font-semibold text-on-accent transition-opacity disabled:opacity-50"
             >
               {ready ? 'Try again' : 'Waiting…'}
             </button>
-            <button onClick={fillInByHand} className="flex-1 border-2 border-white py-3 text-sm font-extrabold text-white">
+            <button onClick={fillInByHand} className="min-h-12 flex-1 rounded-full bg-card-2 text-sm font-semibold text-ink">
               Fill in by hand
             </button>
           </div>
@@ -604,7 +578,7 @@ export function AddReceiptPage() {
       <ModeSwitch mode={mode} onChange={(m) => { setMode(m); setError(null) }} disabled={busy} />
 
       {error && (
-        <div className="mt-3 border-l-4 border-accent-700 bg-accent-50 px-3 py-2 text-sm text-accent-900 dark:bg-accent-950 dark:text-accent-200">
+        <div role="alert" className="mt-3 rounded-2xl bg-red-100 px-4 py-3 text-sm text-red-800 dark:bg-red-500/15 dark:text-red-200">
           {error}
         </div>
       )}
@@ -627,30 +601,28 @@ export function AddReceiptPage() {
             onChange={handleFileSelected}
             className="hidden"
           />
+          {/* The one accent block on this screen: the thing you came here to do. */}
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
-            className={`group mt-4 flex min-h-[200px] w-full flex-col items-center justify-center gap-3 border-2 border-dashed px-6 py-8 text-center transition-colors motion-safe:animate-rise ${
-              dragging
-                ? 'border-accent-700 bg-accent-50 dark:bg-accent-950/40'
-                : 'border-neutral-300 bg-white hover:border-accent-700 hover:bg-accent-50/60 dark:border-neutral-700 dark:bg-neutral-900 dark:hover:bg-neutral-800'
+            className={`mt-3.5 flex min-h-[220px] w-full flex-col justify-between rounded-[28px] bg-accent p-[22px] text-left text-on-accent transition-transform active:scale-[0.98] motion-safe:animate-rise ${
+              dragging ? 'ring-4 ring-ink' : ''
             }`}
             style={{ animationDelay: '60ms' }}
           >
-            <span className="flex h-16 w-16 items-center justify-center text-white motion-safe:animate-bob" style={{ background: ACCENT }}>
-              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                <circle cx="12" cy="13" r="3" />
-              </svg>
+            <span className="motion-safe:animate-bob">
+              <Icon name="camera" size={40} strokeWidth={1.8} />
             </span>
-            <span className="text-lg font-extrabold text-neutral-900 dark:text-neutral-50">
-              {dragging ? 'Drop it here' : imagePreviewUrl ? 'Try a different photo' : 'Snap a receipt'}
-            </span>
-            <span className="max-w-[18rem] text-xs leading-relaxed text-neutral-500 dark:text-neutral-400">
-              Tap for camera, photo library or files — or drag a photo or PDF here.
+            <span>
+              <span className="block font-display text-[28px] leading-tight font-semibold tracking-tight">
+                {dragging ? 'Drop it here' : imagePreviewUrl ? 'Try a different photo' : 'Snap a receipt'}
+              </span>
+              <span className="mt-1 block text-sm opacity-80">
+                Camera, photo library or files. On a computer, drag a photo or PDF here.
+              </span>
             </span>
           </button>
           <HowItWorks />
@@ -662,16 +634,16 @@ export function AddReceiptPage() {
             onChange={(e) => setRawText(e.target.value.slice(0, MAX_RAW_TEXT_CHARS))}
             rows={8}
             placeholder="Paste receipt text, a bank SMS, or an email…"
-            className="mt-4 w-full border-2 border-neutral-200 bg-white px-3 py-2.5 text-base outline-none transition-colors focus:border-accent-700 dark:border-neutral-800 dark:bg-neutral-900"
+            className="field mt-3.5 rounded-3xl! p-4!"
           />
           <div className="mt-1 flex items-center gap-2">
-            <div className="h-1 flex-1 bg-neutral-200 dark:bg-neutral-800">
+            <div className="h-1 flex-1 overflow-hidden rounded-full bg-card">
               <div
-                className="h-full bg-accent-700 transition-[width] duration-300"
+                className="h-full bg-accent transition-[width] duration-300 min-h-11"
                 style={{ width: `${(rawText.length / MAX_RAW_TEXT_CHARS) * 100}%` }}
               />
             </div>
-            <span className="text-[11px] text-neutral-400 tabular-nums">
+            <span className="text-xs text-muted tabular-nums">
               {rawText.length.toLocaleString()}/{MAX_RAW_TEXT_CHARS.toLocaleString()}
             </span>
           </div>
@@ -680,18 +652,14 @@ export function AddReceiptPage() {
             <button
               onClick={handleParseText}
               disabled={!rawText.trim()}
-              className="flex h-12 flex-1 items-center justify-between px-4 text-base font-extrabold text-white transition-opacity disabled:opacity-50"
-              style={{ background: ACCENT }}
+              className="flex min-h-14 flex-1 items-center justify-between rounded-full bg-accent pr-5 pl-6 text-base font-semibold text-on-accent transition-opacity disabled:opacity-50"
             >
               Read it for me
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M5 12h14" />
-                <path d="m12 5 7 7-7 7" />
-              </svg>
+              <Icon name="send" size={20} />
             </button>
             <button
               onClick={() => setFormValues(emptyFormValues(rawText.trim()))}
-              className="h-12 border-2 border-neutral-300 px-4 text-sm font-bold text-neutral-800 dark:border-neutral-700 dark:text-neutral-100"
+              className="min-h-14 rounded-full bg-card px-5 text-sm font-semibold text-ink"
             >
               Type it myself
             </button>
@@ -699,7 +667,7 @@ export function AddReceiptPage() {
         </div>
       )}
 
-      <div className="mt-6">
+      <div className="mt-3.5">
         <ParserStatusCard view={parserView} now={now} />
       </div>
     </div>

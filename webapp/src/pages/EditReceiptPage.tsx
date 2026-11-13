@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ReceiptForm, type ReceiptFormValues } from '../components/ReceiptForm'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { PageHeader } from '../components/PageHeader'
+import { Icon } from '../components/Icon'
 import { useReceipts } from '../hooks/useReceipts'
 import { useSettings } from '../hooks/useSettings'
 import { updateReceipt, deleteReceipt, type ReceiptWriteInput } from '../lib/supabaseClient'
@@ -23,7 +24,8 @@ export function EditReceiptPage() {
   if (!receipt) {
     return (
       <div className="px-4 pt-4">
-        <p className="text-sm text-neutral-500">Receipt not found.</p>
+        <PageHeader title="Edit receipt" backTo="/receipts" />
+        <p className="px-2 py-10 text-center text-[15px] text-muted">This receipt no longer exists.</p>
       </div>
     )
   }
@@ -50,11 +52,11 @@ export function EditReceiptPage() {
   async function handleSubmit(input: ReceiptWriteInput) {
     await updateReceipt(receipt!.id, input)
     await refresh()
-    // Pop back to wherever this edit was opened from (always /receipts today)
+    // Pop back to wherever this edit was opened from (the receipt's own page)
     // instead of pushing a fresh entry — a push would leave this now-stale
-    // edit screen sitting in the back stack, so the next back tap from
-    // /receipts would land right back on it instead of leaving the flow.
-    goBack(navigate, '/receipts')
+    // edit screen sitting in the back stack, so the next back tap would land
+    // right back on it instead of leaving the flow.
+    goBack(navigate, `/receipts/${receipt!.id}`)
   }
 
   async function handleDelete() {
@@ -62,7 +64,12 @@ export function EditReceiptPage() {
     try {
       await deleteReceipt(receipt!.id)
       await refresh()
-      goBack(navigate, '/receipts')
+      // This screen is opened from the receipt's own page, which no longer
+      // has anything to show: pop past both when there's history for it,
+      // otherwise land on the list.
+      const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0
+      if (idx >= 2) navigate(-2)
+      else navigate('/receipts', { replace: true })
     } finally {
       setDeleting(false)
     }
@@ -71,21 +78,24 @@ export function EditReceiptPage() {
   return (
     <div className="px-4 pt-4 pb-6">
       <PageHeader
-        title="Edit Receipt"
-        backTo="/receipts"
+        title="Edit receipt"
+        backTo={`/receipts/${receipt.id}`}
         action={
           <button
             onClick={() => setConfirmingDelete(true)}
-            className="shrink-0 px-1 text-sm font-medium text-red-600"
+            className="flex h-11 shrink-0 items-center rounded-full bg-card px-4 text-sm font-semibold text-red-600 dark:text-red-400"
           >
             Delete
           </button>
         }
       />
       {hasMergedSources(receipt) && (
-        <div className="mt-3 rounded-xl border border-accent-300 bg-accent-50 p-3 text-sm text-accent-900 dark:border-accent-700/60 dark:bg-accent-950/30 dark:text-accent-200">
-          🔗 Merged — this receipt combines data from {receiptSourceLabels(receipt).join(' + ')}. A later import of
-          the same charge was folded in here instead of creating a duplicate.
+        <div className="mt-3 flex gap-2.5 rounded-2xl bg-card px-4 py-3 text-sm text-ink">
+          <Icon name="link" size={18} className="mt-0.5 shrink-0 text-muted" />
+          <p>
+            Merged: this receipt combines data from {receiptSourceLabels(receipt).join(' + ')}. A later import of
+            the same charge was folded in here instead of creating a duplicate.
+          </p>
         </div>
       )}
       <div className="mt-4">

@@ -1,33 +1,49 @@
 @import "tailwindcss";
 
-/* The "accent" ramp is the Modernist/poster design system's warm red-orange
-   (Claude Design project ccbe8d7a, option 2a), introduced on the Home
-   landing page and now the app's one accent color everywhere else too —
-   this replaces the old teal-* usage 1:1 (same 11 shade steps), so every
-   page that used to read `teal-700`/`dark:teal-400` etc. now reads
-   `accent-700`/`dark:accent-400` for the identical role. 700 is the exact
-   brand hex from the handoff; the rest of the ramp is a same-hue lightness
-   scale built around it, reusing the four hexes the landing page's category
-   bars already used (300/500/800, plus one blended step at 200) so the two
-   don't drift into two slightly different reds. */
-@theme {
-  --color-accent-50: #fef2ef;
-  --color-accent-100: #fde1d9;
-  --color-accent-200: #fbc4b7;
-  --color-accent-300: #ff9783;
-  --color-accent-400: #ff7157;
-  --color-accent-500: #ff563c;
-  --color-accent-600: #f2401f;
-  --color-accent-700: #ec3013;
-  --color-accent-800: #dd2b0f;
-  --color-accent-900: #a82309;
-  --color-accent-950: #5c1305;
+/* `dark:` follows the app's own theme (html[data-scheme]), not the OS setting:
+   a theme is picked on the You page and can be dark while the OS is light. */
+@custom-variant dark (&:where([data-scheme="dark"], [data-scheme="dark"] *));
 
-  /* Add Receipt screen motion. Always applied through `motion-safe:` so
-     reduced-motion users get the same layout with no movement. */
+/* Design tokens. Every colour a page uses comes from the semantic set below
+   (bg / card / card-2 / line / ink / muted / accent / on-accent), which each
+   theme redefines further down. `@theme inline` so the utilities reference the
+   live custom property and follow a theme switch without a rebuild. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-on-cat: var(--on-cat);
+
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-display: 'Space Grotesk', 'Inter', system-ui, sans-serif;
+}
+
+@theme {
+  /* The accent ramp is derived from the theme's one accent colour, so the
+     numbered steps (tints for notices, deep shades for text on a tint) follow
+     the theme too. Fills use `bg-accent text-on-accent`, never white text:
+     several themes have an accent too bright for white to read on. */
+  --color-accent-50: color-mix(in oklab, var(--accent) 10%, white);
+  --color-accent-100: color-mix(in oklab, var(--accent) 18%, white);
+  --color-accent-200: color-mix(in oklab, var(--accent) 32%, white);
+  --color-accent-300: color-mix(in oklab, var(--accent) 60%, white);
+  --color-accent-400: color-mix(in oklab, var(--accent) 85%, white);
+  --color-accent-500: var(--accent);
+  --color-accent-600: var(--accent);
+  --color-accent-700: var(--accent);
+  --color-accent-800: color-mix(in oklab, var(--accent) 80%, black);
+  --color-accent-900: color-mix(in oklab, var(--accent) 55%, black);
+  --color-accent-950: color-mix(in oklab, var(--accent) 30%, black);
+
   --animate-rise: rise 0.4s ease-out both;
   --animate-scan: scan 1.8s ease-in-out infinite alternate;
   --animate-bob: bob 2.4s ease-in-out infinite;
+  --animate-grow: grow 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 
   @keyframes rise {
     from { opacity: 0; transform: translateY(10px); }
@@ -42,57 +58,142 @@
     0%, 100% { transform: translateY(0); }
     50% { transform: translateY(-4px); }
   }
+  /* Chart bars rise from the baseline once, on first paint. */
+  @keyframes grow {
+    from { transform: scaleY(0); }
+    to { transform: scaleY(1); }
+  }
 }
 
-:root {
-  color-scheme: light dark;
+/* ---- Themes -------------------------------------------------------------
+   Picked on the You page (lib/theme.ts), stored per device, and stamped on
+   <html> as data-theme + data-scheme before React mounts (see index.html).
+   Midnight is also the fallback when nothing is stored. To add a theme: one
+   block here and one entry in THEMES in lib/theme.ts. */
+:root,
+[data-theme="midnight"] {
+  --bg: #0b0c10; --card: #15171d; --card-2: #1f222b; --line: #2a2e38;
+  --ink: #f4f5f7; --muted: #a3aab8; --accent: #c8f53c; --on-accent: #0b0c10;
+}
+[data-theme="ember"] {
+  --bg: #120d0b; --card: #1d1613; --card-2: #2a201b; --line: #3a2d26;
+  --ink: #faf3ee; --muted: #b8a79b; --accent: #ff6a3d; --on-accent: #1a0b05;
+}
+[data-theme="ocean"] {
+  --bg: #07121f; --card: #0e1c2e; --card-2: #17293f; --line: #233a55;
+  --ink: #eef4fa; --muted: #9db0c5; --accent: #4fe3d0; --on-accent: #04201c;
+}
+[data-theme="orchid"] {
+  --bg: #110c18; --card: #1a1424; --card-2: #251d33; --line: #352a47;
+  --ink: #f6f1fb; --muted: #b1a5c2; --accent: #b99bff; --on-accent: #160b2e;
+}
+[data-theme="paper"] {
+  --bg: #f3f1eb; --card: #ffffff; --card-2: #ebe8e0; --line: #dad6cc;
+  --ink: #15161a; --muted: #5c616c; --accent: #2b4bff; --on-accent: #ffffff;
+}
+[data-theme="sorbet"] {
+  --bg: #fbf1ec; --card: #ffffff; --card-2: #f6e6de; --line: #ebd3c8;
+  --ink: #2a1a16; --muted: #7a5f57; --accent: #d93a22; --on-accent: #ffffff;
+}
+
+/* Category colours come in two sets because one set can't serve both: a fill
+   bright enough to read on a near-black card washes out on white. Each dot,
+   bar and icon badge uses var(--cat-N); text on a badge uses --on-cat. */
+:root,
+[data-scheme="dark"] {
+  color-scheme: dark;
+  --on-cat: #0b0c10;
+  --cat-1: #ff8a5c; --cat-2: #4fd8b4; --cat-3: #6cb6ff; --cat-4: #b89cff;
+  --cat-5: #ff8fc7; --cat-6: #f2cf5b; --cat-7: #9be564; --cat-8: #c9a27a;
+  --cat-9: #7fe0f0; --cat-10: #a8b3c7; --cat-11: #ff7b7b; --cat-12: #8c9eff;
+}
+/* Screens written against Tailwind's grey ramp pick the theme up through
+   these: in a dark theme the deep steps are the surfaces, in a light theme the
+   pale ones are. Scoped to the scheme attribute only (not :root), so a light
+   theme never inherits the dark mapping. */
+[data-scheme="dark"] {
+  --color-neutral-950: var(--bg);
+  --color-neutral-900: var(--card);
+  --color-neutral-800: var(--card-2);
+  --color-neutral-700: var(--line);
+  --color-neutral-400: var(--muted);
+  --color-neutral-300: color-mix(in oklab, var(--muted) 60%, var(--ink));
+  --color-neutral-50: var(--ink);
+}
+[data-scheme="light"] {
+  color-scheme: light;
+  --on-cat: #ffffff;
+  --cat-1: #d9541e; --cat-2: #0e8f72; --cat-3: #2470d6; --cat-4: #6c4bd8;
+  --cat-5: #cf3d8b; --cat-6: #a87a00; --cat-7: #4d8f1f; --cat-8: #8a623a;
+  --cat-9: #0d8597; --cat-10: #5f6b7e; --cat-11: #c93434; --cat-12: #4453c9;
+
+  --color-neutral-50: var(--bg);
+  --color-neutral-100: var(--card-2);
+  --color-neutral-200: var(--line);
+  --color-neutral-300: color-mix(in oklab, var(--line) 70%, var(--muted));
+  --color-neutral-500: var(--muted);
+  --color-neutral-600: var(--muted);
+  --color-neutral-900: var(--ink);
+  --color-neutral-950: var(--ink);
 }
 
 html, body, #root {
   height: 100%;
 }
 
-/* A base colour pair has to live here, not only on Tailwind utility classes.
-   Without it the browser's default near-black text renders on the dark-mode
-   background — every input looks empty even when it holds a value, which reads
-   as "the data didn't load" rather than "the text is invisible". */
+/* A base colour pair has to live here, not only on utility classes. Without
+   it the browser's default near-black text renders on a dark background and
+   every input looks empty even when it holds a value. */
 body {
   margin: 0;
   overscroll-behavior-y: none;
   -webkit-font-smoothing: antialiased;
-  color: #171717;            /* neutral-900 */
-  background-color: #fafafa; /* neutral-50  */
-  /* Archivo was previously loaded (see index.html) but scoped to just the
-     Home landing page's poster treatment via a Tailwind class. Now the
-     app-wide default so every re-themed page shares it without repeating
-     the font-family utility on each one. */
-  font-family: 'Archivo', system-ui, sans-serif;
+  color: var(--ink);
+  background-color: var(--bg);
+  font-family: var(--font-sans);
 }
 
-@media (prefers-color-scheme: dark) {
-  body {
-    color: #fafafa;            /* neutral-50  */
-    background-color: #0a0a0a; /* neutral-950 */
-  }
-}
-
-/* Form controls don't inherit colour from their parent by default, so they need
-   saying explicitly. These are element selectors, so any Tailwind text-* class
-   on a specific control still wins. */
+/* Form controls don't inherit colour from their parent by default. These are
+   element selectors, so any text-* class on a specific control still wins. */
 input,
 textarea,
 select {
   color: inherit;
 }
 
-/* Placeholders must stay distinguishable from real input in both themes —
+/* Placeholders must stay distinguishable from real input in every theme,
    otherwise a placeholder reads as a filled value. */
 ::placeholder {
-  color: #737373; /* neutral-500 */
+  color: var(--muted);
   opacity: 1;
 }
 
 /* Safari renders date/time inputs with a hardcoded dark glyph colour. */
 input[type="date"]::-webkit-calendar-picker-indicator {
   filter: invert(0.5);
+}
+
+/* The standard look for a text field, select or textarea. One class so every
+   form in the app matches without repeating ten utilities per input. */
+@utility field {
+  width: 100%;
+  min-height: 3rem;
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background-color: var(--card);
+  padding: 0.625rem 0.875rem;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 150ms;
+  &:focus {
+    border-color: var(--accent);
+  }
+}
+
+/* Chip rows scroll sideways without showing a scrollbar. */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }

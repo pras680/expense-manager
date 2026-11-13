@@ -86,49 +86,49 @@ export function SmsSetupPage() {
   return (
     <div className="px-4 pt-4 pb-6">
       <PageHeader title="SMS Import" backTo="/settings" />
-      <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+      <p className="mt-3 px-1 text-[15px] leading-relaxed text-muted">
         Your own token tells the server that a forwarded bank alert is <em>yours</em>, so the
         receipt lands under your name and uses your currency.
       </p>
 
       <Link
         to="/settings/sms/log"
-        className="mt-2 block text-sm text-accent-700 dark:text-accent-400"
+        className="mt-2 inline-flex min-h-11 items-center rounded-full bg-card px-4 text-sm font-medium text-ink active:bg-card-2"
       >
         View processing log →
       </Link>
 
       {error && (
-        <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div className="mt-3 rounded-2xl bg-red-100 px-4 py-3 text-sm text-red-800 dark:bg-red-500/15 dark:text-red-200">
           {error}
         </div>
       )}
 
       {/* Shown exactly once — the server only ever stores a hash of this. */}
       {newToken && (
-        <div className="mt-4 rounded-xl border border-accent-300 bg-accent-50 p-4 dark:border-accent-800 dark:bg-accent-950/40">
-          <p className="text-sm font-semibold text-accent-900 dark:text-accent-200">
+        <div className="mt-4 rounded-2xl border border-accent/40 bg-accent/15 p-4">
+          <p className="text-sm font-semibold text-ink">
             Copy this now — it can't be shown again
           </p>
-          <code className="mt-2 block break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-neutral-800 dark:bg-neutral-900 dark:text-neutral-100">
+          <code className="mt-2 block break-all rounded-2xl bg-card px-3 py-2 font-mono text-xs text-ink">
             {newToken}
           </code>
           <div className="mt-2 flex gap-2">
             <button
               onClick={copyToken}
-              className="rounded-lg bg-accent-700 px-3 py-1.5 text-sm font-medium text-white"
+              className="rounded-full bg-accent px-3 py-1.5 text-sm font-medium text-on-accent min-h-11"
             >
               {copied ? 'Copied' : 'Copy'}
             </button>
             <button
               onClick={() => setNewToken(null)}
-              className="rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+              className="rounded-full bg-card-2 px-3 py-1.5 text-sm font-medium text-ink min-h-11"
             >
               Done
             </button>
           </div>
 
-          <div className="mt-4 border-t border-accent-200 pt-3 text-xs text-accent-900 dark:border-accent-800 dark:text-accent-200">
+          <div className="mt-4 border-t border-accent/40 pt-3 text-[13px] text-ink">
             {/* Manual setup leads: recent iOS builds have started rejecting an
                 unsigned .shortcut file outright ("Unsigned Shortcuts is Not
                 Supported"), with no "Allow Untrusted Shortcuts" toggle offered
@@ -157,17 +157,17 @@ export function SmsSetupPage() {
             </ol>
 
             <details className="mt-3">
-              <summary className="cursor-pointer text-[11px] font-medium text-accent-800/80 dark:text-accent-300/80">
+              <summary className="cursor-pointer text-[13px] font-medium text-ink">
                 Prefer not to build it by hand? Try the downloadable version (works on some
                 devices, not others)
               </summary>
               <button
                 onClick={() => downloadSmsShortcut(`${env.supabaseUrl}/functions/v1/receive-sms`, newToken)}
-                className="mt-2 rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100"
+                className="mt-2 rounded-full bg-card-2 px-3 py-1.5 text-sm font-medium text-ink min-h-11"
               >
                 Download Shortcut
               </button>
-              <p className="mt-2 text-[11px] text-accent-800/80 dark:text-accent-300/80">
+              <p className="mt-2 text-[13px] text-muted">
                 Open the downloaded file → <strong>Add Shortcut</strong>. If iOS blocks it, check
                 Settings → Shortcuts for "Allow Untrusted Shortcuts" (only appears for a few
                 minutes right after a blocked attempt). If it says "Unsigned Shortcuts is Not
@@ -185,22 +185,22 @@ export function SmsSetupPage() {
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="Label (e.g. My iPhone)"
-          className="flex-1 rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+          className="field flex-1"
         />
         <button
           onClick={handleCreate}
           disabled={busy}
-          className="rounded-lg bg-accent-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          className="rounded-full bg-accent px-5 text-sm font-semibold text-on-accent disabled:opacity-60 min-h-12"
         >
           {busy ? '…' : 'Generate'}
         </button>
       </div>
 
-      <h2 className="mt-6 text-sm font-semibold text-neutral-700 dark:text-neutral-300">Your tokens</h2>
+      <h2 className="mt-6 px-1 text-[13px] font-medium text-muted">Your tokens</h2>
       {loading ? (
-        <p className="mt-2 text-sm text-neutral-500">Loading…</p>
+        <p className="mt-2 text-sm text-muted">Loading…</p>
       ) : active.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-2 text-sm text-muted">
           No active tokens. Generate one to start importing SMS automatically.
         </p>
       ) : (
@@ -208,17 +208,17 @@ export function SmsSetupPage() {
           {active.map((t) => (
             <div
               key={t.id}
-              className="flex items-center justify-between rounded-lg border border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900"
+              className="flex items-center justify-between rounded-2xl bg-card px-4 py-3.5"
             >
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-50">
+                <div className="truncate text-sm font-medium text-ink">
                   {t.label || 'Unlabelled'}
                 </div>
-                <div className="text-xs text-neutral-500 dark:text-neutral-400">
+                <div className="text-xs text-muted">
                   added {formatDate(t.createdAt)} · last used {formatDate(t.lastUsedAt)}
                 </div>
               </div>
-              <button onClick={() => setRevoking(t)} className="shrink-0 text-sm font-medium text-red-600">
+              <button onClick={() => setRevoking(t)} className="shrink-0 min-h-11 px-1 text-sm font-medium text-red-600 dark:text-red-400">
                 Revoke
               </button>
             </div>
@@ -227,7 +227,7 @@ export function SmsSetupPage() {
       )}
 
       {revoked.length > 0 && (
-        <p className="mt-3 text-xs text-neutral-400">{revoked.length} revoked token(s) hidden.</p>
+        <p className="mt-3 text-xs text-muted">{revoked.length} revoked token(s) hidden.</p>
       )}
 
       {revoking && (

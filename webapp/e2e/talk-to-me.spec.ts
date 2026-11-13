@@ -10,6 +10,8 @@ test.skip(!EMAIL || !PASSWORD, 'TEST_USER_EMAIL/TEST_USER_PASSWORD not set — s
 
 const ASK_URL = '**/functions/v1/ask-spending'
 
+// One entry point per screen, both with this accessible name: the Ask bar on
+// Home, and the floating "Ask" button on the Insights and Receipts tabs.
 const launcher = (page: Page) => page.getByRole('button', { name: /Talk to me/ })
 const panel = (page: Page) => page.getByRole('dialog', { name: 'Talk to me' })
 
@@ -28,7 +30,7 @@ test.describe('Talk to me', () => {
   })
 
   test('launcher is hidden on the Add Receipt form', async ({ page }) => {
-    await page.getByRole('link', { name: /Add/ }).click()
+    await page.getByRole('link', { name: 'Add', exact: true }).click()
     await expect(page).toHaveURL('/add')
     await expect(launcher(page)).toBeHidden()
   })
@@ -151,7 +153,7 @@ test.describe('Talk to me', () => {
     await expect(panel(page).getByText('Noted.')).toBeVisible()
     await page.keyboard.press('Escape')
 
-    await page.getByRole('link', { name: /Reports/ }).click()
+    await page.getByRole('link', { name: 'Insights', exact: true }).click()
     await expect(page).toHaveURL('/reports')
     await launcher(page).click()
     await expect(panel(page).getByText('remember me')).toBeVisible()

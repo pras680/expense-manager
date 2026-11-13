@@ -1,28 +1,16 @@
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { Receipt } from '../types/receipt'
-import { CategoryBadge } from './CategoryBadge'
+import { CategoryIcon } from './CategoryIcon'
 import { ConfirmDialog } from './ConfirmDialog'
+import { Icon } from './Icon'
 import { reportingTotal, reportingCurrency, needsReview, hasMergedSources, receiptSourceLabels } from '../lib/receiptShape'
+import { formatDate, formatMoney } from '../lib/format'
+import type { TrailState } from '../lib/trail'
 import { useSettings } from '../hooks/useSettings'
 import { useAuth } from '../hooks/useAuth'
 import { useReceipts } from '../hooks/useReceipts'
 import { deleteReceipt, markReceiptsReviewed } from '../lib/supabaseClient'
-
-function formatMoney(amount: number, currency: string) {
-  try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
-}
-
-function formatDate(iso: string | null) {
-  if (!iso) return 'No date'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return 'No date'
-  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
-}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
@@ -35,7 +23,17 @@ const ACTION_WIDTH = 88
 const OPEN_THRESHOLD = ACTION_WIDTH / 2
 const TAP_SLOP = 8
 
-export function ReceiptCard({ receipt, showSwipeHint }: { receipt: Receipt; showSwipeHint?: boolean }) {
+interface ReceiptCardProps {
+  receipt: Receipt
+  /** Lists grouped by day already show the date as a heading; others need it per row. */
+  showDate?: boolean
+  /** Breadcrumb trail to hand the receipt page, so it can show the path taken here. */
+  linkState?: TrailState
+  /** Sits inside a card (no surface or rounding of its own) rather than standing alone. */
+  flat?: boolean
+}
+
+export function ReceiptCard({ receipt, showDate = true, linkState, flat = false }: ReceiptCardProps) {
   const total = reportingTotal(receipt)
   const currency = reportingCurrency(receipt)
   const { nameFor } = useSettings()
@@ -154,20 +152,27 @@ export function ReceiptCard({ receipt, showSwipeHint }: { receipt: Receipt; show
     }
   }
 
+  // One quiet line of facts under the merchant: category, card, where it came
+  // from, and the date when the list around it isn't already grouped by day.
+  // The date leads when shown: it's the one fact that tells apart two
+  // receipts from the same merchant, so it mustn't be the part that truncates.
+  const meta = [
+    showDate ? formatDate(receipt.date) : null,
+    receipt.category,
+    receipt.cardLast4 ? `•••• ${receipt.cardLast4}` : null,
+    sourceLabel
+  ].filter(Boolean).join(' · ')
+
   return (
-    <div className="relative overflow-hidden rounded-xl">
-      {/* Plain neutral panel, text label only — no color, no icon. The
-          softened red/green tint from the previous pass was still visibly
-          "behind" the amount once revealed and still read as competing for
-          attention; the direction the user just dragged already tells them
-          which action this is, so the label alone is enough once it's
-          open — color isn't carrying any information a screen-reader-only
-          decision needs. */}
+    <div className={`relative overflow-hidden ${flat ? '' : 'rounded-2xl'}`}>
+      {/* Plain neutral panels, text label only: the direction of the drag
+          already says which action this is, so the revealed panel doesn't
+          need colour competing with the amount beside it. */}
       <div className="absolute inset-y-0 left-0" style={{ width: ACTION_WIDTH }}>
         <button
           type="button"
           onClick={() => setConfirmingDelete(true)}
-          className="flex h-full w-full items-center justify-center bg-neutral-100 text-sm font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+          className="flex h-full w-full items-center justify-center bg-card-2 text-sm font-medium text-ink"
         >
           Delete
         </button>
@@ -178,7 +183,7 @@ export function ReceiptCard({ receipt, showSwipeHint }: { receipt: Receipt; show
             type="button"
             onClick={handleApprove}
             disabled={approving}
-            className="flex h-full w-full items-center justify-center bg-neutral-100 text-sm font-medium text-neutral-700 disabled:opacity-70 dark:bg-neutral-800 dark:text-neutral-300"
+            className="flex h-full w-full items-center justify-center bg-card-2 text-sm font-medium text-ink disabled:opacity-70"
           >
             {approving ? '…' : 'Approve'}
           </button>
@@ -186,7 +191,8 @@ export function ReceiptCard({ receipt, showSwipeHint }: { receipt: Receipt; show
       )}
 
       <Link
-        to={`/receipts/${receipt.id}/edit`}
+        to={`/receipts/${receipt.id}`}
+        state={linkState}
         onClick={onContentClick}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
@@ -197,70 +203,42 @@ export function ReceiptCard({ receipt, showSwipeHint }: { receipt: Receipt; show
           transition: dragging ? 'none' : 'transform 200ms ease-out',
           touchAction: 'pan-y'
         }}
-        className={`relative flex items-center justify-between gap-3 rounded-xl border px-4 py-3 active:bg-neutral-50 dark:active:bg-neutral-800 ${
-          unreviewed
-            ? 'border-amber-400 bg-amber-50 dark:border-amber-600/60 dark:bg-amber-950/30'
-            : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900'
-        }`}
+        className={`relative flex min-h-[68px] items-center gap-3 bg-card py-2.5 ${flat ? '' : 'rounded-2xl px-4'}`}
       >
-        {/* One-time, one-card hint that these rows are swipeable at all —
-            shown only on the first receipt in the list, not repeated on
-            every card. A plain flex sibling (not an absolute overlay), so
-            it just pushes the merchant column over by its own width rather
-            than sitting on top of anything — there's no position at which
-            it could overlap the amount or any text. */}
-        {showSwipeHint && (
-          <div className="shrink-0 text-neutral-300 dark:text-neutral-600" aria-hidden="true">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M8 7l-5 5 5 5" />
-              <path d="M16 7l5 5-5 5" />
-            </svg>
-          </div>
-        )}
+        <CategoryIcon category={receipt.category} />
         <div className="min-w-0 flex-1">
-          <div className="truncate font-medium text-neutral-900 dark:text-neutral-50">
+          <div className="truncate text-[15px] font-medium text-ink">
             {receipt.merchant || 'Unknown merchant'}
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <span>{formatDate(receipt.date)}</span>
-            {receipt.cardLast4 && <span>•••• {receipt.cardLast4}</span>}
-          </div>
-          {(receipt.category || showOwner || receipt.visibility === 'private' || sourceLabel || unreviewed || merged) && (
+          {meta && <div className="mt-0.5 truncate text-[13px] text-muted">{meta}</div>}
+          {(unreviewed || merged || showOwner || receipt.visibility === 'private') && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {unreviewed && (
-                <span className="inline-block rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-semibold text-white">
-                  Check
-                </span>
+                <span className="rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-on-accent">Check</span>
               )}
               {merged && (
                 <span
                   title={`Combined data from ${receiptSourceLabels(receipt).join(' + ')}`}
-                  className="inline-block rounded-full bg-accent-100 px-2 py-0.5 text-[11px] font-medium text-accent-800 dark:bg-accent-900/50 dark:text-accent-300"
+                  className="flex items-center gap-1 rounded-full bg-card-2 px-2 py-0.5 text-[11px] font-medium text-ink"
                 >
-                  🔗 Merged
-                </span>
-              )}
-              {receipt.category && <CategoryBadge category={receipt.category} />}
-              {sourceLabel && (
-                <span className="inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
-                  {sourceLabel}
+                  <Icon name="link" size={11} />
+                  Merged
                 </span>
               )}
               {showOwner && (
-                <span className="inline-block rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-medium text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-                  {owner}
-                </span>
+                <span className="rounded-full bg-card-2 px-2 py-0.5 text-[11px] font-medium text-ink">{owner}</span>
               )}
               {receipt.visibility === 'private' && (
-                <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+                <span className="flex items-center gap-1 rounded-full bg-card-2 px-2 py-0.5 text-[11px] font-medium text-ink">
+                  <Icon name="lock" size={11} />
                   Private
                 </span>
               )}
             </div>
           )}
         </div>
-        <div className="shrink-0 text-right font-semibold text-neutral-900 dark:text-neutral-50">
-          {total != null ? formatMoney(total, currency) : '—'}
+        <div className="shrink-0 text-right font-display text-base font-semibold text-ink">
+          {total != null ? formatMoney(total, currency, { cents: true }) : '—'}
         </div>
       </Link>
 

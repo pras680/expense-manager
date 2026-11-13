@@ -109,26 +109,26 @@ export function GmailSetupPage() {
   return (
     <div className="px-4 pt-4 pb-6">
       <PageHeader title="Gmail import" backTo="/settings" />
-      <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+      <p className="mt-3 px-1 text-[15px] leading-relaxed text-muted">
         Connect your inbox and receipts from emailed bills and payment alerts are added
         automatically, twice a day. Read-only — nothing is ever sent or deleted. Use
         "Scan now" below for anything you want picked up sooner.
       </p>
 
       {error && (
-        <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div className="mt-3 rounded-2xl bg-red-100 px-4 py-3 text-sm text-red-800 dark:bg-red-500/15 dark:text-red-200">
           {error}
         </div>
       )}
 
       {loading ? (
-        <p className="mt-4 text-sm text-neutral-500">Loading…</p>
+        <p className="mt-4 text-sm text-muted">Loading…</p>
       ) : connection ? (
-        <div className="mt-4 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
-          <p className="text-sm font-medium text-neutral-900 dark:text-neutral-50">
+        <div className="mt-4 rounded-3xl bg-card p-[18px]">
+          <p className="text-sm font-medium text-ink">
             Connected as {connection.email}
           </p>
-          <dl className="mt-2 space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
+          <dl className="mt-2 space-y-1 text-xs text-muted">
             <div className="flex justify-between">
               <dt>Connected</dt><dd>{formatWhen(connection.connectedAt)}</dd>
             </div>
@@ -138,13 +138,13 @@ export function GmailSetupPage() {
           </dl>
 
           {connection.lastError && (
-            <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            <div className="mt-3 rounded-2xl bg-amber-100 px-4 py-3 text-[13px] text-amber-900 dark:bg-amber-400/15 dark:text-amber-200">
               {connection.lastError}
             </div>
           )}
 
           {scanMessage && (
-            <div className="mt-3 rounded-lg bg-accent-50 px-3 py-2 text-xs text-accent-800 dark:bg-accent-950 dark:text-accent-300">
+            <div className="mt-3 rounded-2xl bg-accent/15 px-3 py-2 text-xs text-ink">
               {scanMessage}
             </div>
           )}
@@ -152,7 +152,7 @@ export function GmailSetupPage() {
           <button
             onClick={handleScanNow}
             disabled={scanning || busy}
-            className="mt-3 w-full rounded-lg bg-accent-700 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+            className="mt-3 w-full rounded-full bg-accent text-sm font-semibold text-on-accent disabled:opacity-60 min-h-12"
           >
             {scanning ? 'Scanning…' : 'Scan now'}
           </button>
@@ -161,14 +161,14 @@ export function GmailSetupPage() {
             <button
               onClick={handleConnect}
               disabled={busy}
-              className="rounded-lg bg-neutral-100 px-3 py-2 text-sm font-medium text-neutral-800 disabled:opacity-60 dark:bg-neutral-800 dark:text-neutral-100"
+              className="rounded-full bg-card-2 px-3 py-2 text-sm font-medium text-ink disabled:opacity-60 min-h-11"
             >
               Reconnect
             </button>
             <button
               onClick={() => setDisconnecting(true)}
               disabled={busy}
-              className="rounded-lg px-3 py-2 text-sm font-medium text-red-600 disabled:opacity-60"
+              className="min-h-11 rounded-full px-3 text-sm font-medium text-red-600 dark:text-red-400 disabled:opacity-60"
             >
               Disconnect
             </button>
@@ -176,7 +176,7 @@ export function GmailSetupPage() {
 
           <Link
             to="/settings/gmail/log"
-            className="mt-3 block text-sm text-accent-700 dark:text-accent-400"
+            className="mt-3 inline-flex min-h-11 items-center rounded-full bg-card-2 px-4 text-sm font-medium text-ink"
           >
             View scan log →
           </Link>
@@ -186,11 +186,11 @@ export function GmailSetupPage() {
           <button
             onClick={handleConnect}
             disabled={busy}
-            className="w-full rounded-lg bg-accent-700 py-3 text-base font-semibold text-white disabled:opacity-60"
+            className="w-full rounded-full bg-accent min-h-14 text-base font-semibold text-on-accent disabled:opacity-60"
           >
             {busy ? 'Connecting…' : 'Connect Gmail'}
           </button>
-          <p className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
+          <p className="mt-3 text-xs text-muted">
             Each household member connects their own inbox, and receipts are filed under
             whoever's mailbox they came from.
           </p>

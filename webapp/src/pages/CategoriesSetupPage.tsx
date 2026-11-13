@@ -117,7 +117,7 @@ export function CategoriesSetupPage() {
   return (
     <div className="px-4 pt-4 pb-6">
       <PageHeader title="Categories" backTo="/settings" />
-      <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+      <p className="mt-3 px-1 text-[15px] leading-relaxed text-muted">
         Add categories specific to your household. They show up alongside the built-in ones when
         editing a receipt, and once you've used one on a receipt from a merchant, future SMS and
         email imports from that merchant will apply it automatically. Renaming one also renames it
@@ -125,7 +125,7 @@ export function CategoriesSetupPage() {
       </p>
 
       {error && (
-        <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div className="mt-3 rounded-2xl bg-red-100 px-4 py-3 text-sm text-red-800 dark:bg-red-500/15 dark:text-red-200">
           {error}
         </div>
       )}
@@ -136,24 +136,24 @@ export function CategoriesSetupPage() {
           value={name}
           onChange={(e) => { setName(e.target.value); setError(null) }}
           placeholder="e.g. Pet Supplies"
-          className="flex-1 rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
+          className="field flex-1"
         />
         <button
           onClick={handleAdd}
           disabled={busy || !name.trim()}
-          className="rounded-lg bg-accent-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+          className="rounded-full bg-accent px-5 text-sm font-semibold text-on-accent disabled:opacity-60 min-h-12"
         >
           {busy ? '…' : 'Add'}
         </button>
       </div>
 
-      <h2 className="mt-6 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+      <h2 className="mt-6 px-1 text-[13px] font-medium text-muted">
         Your household's categories
       </h2>
       {loading ? (
-        <p className="mt-2 text-sm text-neutral-500">Loading…</p>
+        <p className="mt-2 text-sm text-muted">Loading…</p>
       ) : categories.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-2 text-sm text-muted">
           None yet — the built-in categories are still available everywhere.
         </p>
       ) : (
@@ -161,7 +161,7 @@ export function CategoriesSetupPage() {
           {categories.map((c) => (
             <div
               key={c.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900"
+              className="flex items-center justify-between gap-3 rounded-2xl bg-card px-4 py-3.5"
             >
               {editingId === c.id ? (
                 <>
@@ -175,20 +175,20 @@ export function CategoriesSetupPage() {
                       if (e.key === 'Enter') handleRename(c)
                       if (e.key === 'Escape') setEditingId(null)
                     }}
-                    className="min-w-0 flex-1 rounded-md border border-neutral-300 px-2 py-1.5 text-base dark:border-neutral-700 dark:bg-neutral-950"
+                    className="field min-h-11! min-w-0 flex-1 py-1.5!"
                   />
                   <div className="flex shrink-0 gap-3">
                     <button
                       onClick={() => handleRename(c)}
                       disabled={busy || !editName.trim()}
-                      className="text-sm font-semibold text-accent-700 disabled:opacity-60 dark:text-accent-400"
+                      className="min-h-11 px-1 text-sm font-semibold text-accent disabled:opacity-60"
                     >
                       {busy ? '…' : 'Save'}
                     </button>
                     <button
                       onClick={() => setEditingId(null)}
                       disabled={busy}
-                      className="text-sm font-medium text-neutral-500"
+                      className="min-h-11 px-1 text-sm font-medium text-muted"
                     >
                       Cancel
                     </button>
@@ -196,12 +196,12 @@ export function CategoriesSetupPage() {
                 </>
               ) : (
                 <>
-                  <span className="min-w-0 truncate text-sm font-medium text-neutral-900 dark:text-neutral-50">{c.name}</span>
+                  <span className="min-w-0 truncate text-sm font-medium text-ink">{c.name}</span>
                   <div className="flex shrink-0 gap-4">
-                    <button onClick={() => startEditing(c)} className="text-sm font-medium text-neutral-600 dark:text-neutral-300">
+                    <button onClick={() => startEditing(c)} className="min-h-11 px-1 text-sm font-medium text-muted">
                       Rename
                     </button>
-                    <button onClick={() => setDeleting(c)} className="text-sm font-medium text-red-600">
+                    <button onClick={() => setDeleting(c)} className="min-h-11 px-1 text-sm font-medium text-red-600 dark:text-red-400">
                       Remove
                     </button>
                   </div>

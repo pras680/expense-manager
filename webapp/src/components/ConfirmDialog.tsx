@@ -9,19 +9,19 @@ interface ConfirmDialogProps {
 
 export function ConfirmDialog({ title, message, confirmLabel = 'Confirm', onConfirm, onCancel, busy }: ConfirmDialogProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 sm:items-center" onClick={onCancel}>
       <div
-        className="w-full max-w-sm rounded-t-2xl bg-white p-5 sm:rounded-2xl dark:bg-neutral-900"
-        style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}
+        className="w-full max-w-sm rounded-t-[28px] bg-card p-6 sm:rounded-[28px]"
+        style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-50">{title}</h2>
-        <p className="mt-1.5 text-sm text-neutral-600 dark:text-neutral-400">{message}</p>
+        <h2 className="font-display text-lg font-semibold text-ink">{title}</h2>
+        <p className="mt-1.5 text-[15px] text-muted">{message}</p>
         <div className="mt-5 flex gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="flex-1 rounded-lg bg-neutral-100 py-2.5 text-sm font-medium text-neutral-800 dark:bg-neutral-800 dark:text-neutral-100"
+            className="min-h-12 flex-1 rounded-full bg-card-2 text-base font-semibold text-ink"
           >
             Cancel
           </button>
@@ -29,7 +29,7 @@ export function ConfirmDialog({ title, message, confirmLabel = 'Confirm', onConf
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="flex-1 rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+            className="min-h-12 flex-1 rounded-full bg-red-600 text-base font-semibold text-white disabled:opacity-60"
           >
             {busy ? 'Please wait…' : confirmLabel}
           </button>

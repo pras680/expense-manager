@@ -1,37 +1,53 @@
 import { NavLink, useLocation } from 'react-router-dom'
+import { Icon, type IconName } from './Icon'
 
-const tabs = [
-  { to: '/', label: 'Home', icon: '\u{1F9FE}' },
-  { to: '/add', label: 'Add', icon: '➕' },
-  { to: '/reports', label: 'Reports', icon: '\u{1F4CA}' },
-  { to: '/settings', label: 'Settings', icon: '⚙️' }
+const TABS: { to: string; label: string; icon: IconName }[] = [
+  { to: '/', label: 'Home', icon: 'home' },
+  { to: '/reports', label: 'Insights', icon: 'chart' },
+  { to: '/add', label: 'Add', icon: 'plus' },
+  { to: '/receipts', label: 'Receipts', icon: 'receipt' },
+  { to: '/settings', label: 'You', icon: 'user' }
 ]
+
+/** Height the page content has to clear: the bar itself plus its bottom gap. */
+export const NAV_CLEARANCE = 'calc(5.75rem + env(safe-area-inset-bottom))'
 
 export function NavBar() {
   const { pathname } = useLocation()
-  // The Home tab covers both the landing dashboard and the full receipts list
-  // it links out to (/receipts, /receipts/:id/edit) — those aren't a tab of
-  // their own, so without this the bar would show nothing active while
-  // browsing or editing receipts.
-  const homeIsActive = pathname === '/' || pathname.startsWith('/receipts')
 
   return (
     <nav
-      className="fixed bottom-0 inset-x-0 z-20 border-t border-neutral-200 bg-white/95 backdrop-blur dark:border-neutral-800 dark:bg-neutral-900/95"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      aria-label="Main"
+      className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3"
+      style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
     >
-      <div className="grid grid-cols-4">
-        {tabs.map((tab) => {
-          const active = tab.to === '/' ? homeIsActive : pathname.startsWith(tab.to)
+      {/* A floating pill rather than an edge-to-edge bar: the page scrolls
+          visibly behind it, and on a wide screen it stays phone-width instead
+          of stretching five icons across a desktop. */}
+      <div className="pointer-events-auto mx-auto grid h-16 max-w-md grid-cols-5 items-center rounded-full border border-line bg-card/90 px-1.5 shadow-lg shadow-black/20 backdrop-blur-md">
+        {TABS.map((tab) => {
+          const active = tab.to === '/' ? pathname === '/' : pathname.startsWith(tab.to)
+          if (tab.to === '/add') {
+            return (
+              <NavLink key={tab.to} to={tab.to} aria-label="Add" className="flex h-full items-center justify-center">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent text-on-accent transition-transform active:scale-95">
+                  <Icon name="plus" size={24} strokeWidth={2.4} />
+                </span>
+              </NavLink>
+            )
+          }
           return (
             <NavLink
               key={tab.to}
               to={tab.to}
-              className={`flex flex-col items-center justify-center gap-0.5 py-2.5 text-xs font-medium ${
-                active ? 'text-accent-700 dark:text-accent-400' : 'text-neutral-500 dark:text-neutral-400'
+              data-active={active}
+              className={`flex h-full flex-col items-center justify-center gap-1 text-[11px] font-medium ${
+                active ? 'text-ink' : 'text-muted'
               }`}
             >
-              <span className="text-xl leading-none">{tab.icon}</span>
+              <span className={`flex h-7 w-12 items-center justify-center rounded-full ${active ? 'bg-card-2' : ''}`}>
+                <Icon name={tab.icon} size={20} />
+              </span>
               {tab.label}
             </NavLink>
           )

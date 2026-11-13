@@ -4,19 +4,22 @@ import { useReceipts } from '../hooks/useReceipts'
 import { useAuth } from '../hooks/useAuth'
 import { useSettings } from '../hooks/useSettings'
 import { ReceiptCard } from '../components/ReceiptCard'
-import { StatTile } from '../components/StatTile'
-import { PageHeader } from '../components/PageHeader'
+import { Chip, EmptyState, Notice, btn } from '../components/ui'
+import { Icon } from '../components/Icon'
 import { receiptMatches, reportingTotal, needsReview, isExpenseReceipt, hasMergedSources } from '../lib/receiptShape'
+import { dayKey, dayLabel, formatMoney, plural } from '../lib/format'
+import type { Receipt } from '../types/receipt'
+import type { TrailState } from '../lib/trail'
 import { markReceiptsReviewed } from '../lib/supabaseClient'
 
-type FilterKey = 'all' | 'last30' | 'noDate'
-type OwnerFilter = 'everyone' | 'mine'
+// The Receipts tab: every receipt, newest first, grouped by day. One search
+// box and one row of filter chips; the chips combine (To review + Mine shows
+// your own unchecked imports).
 
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'last30', label: 'Last 30 Days' },
-  { key: 'noDate', label: 'No Date' }
-]
+type FilterKey = 'review' | 'mine' | 'last30' | 'noDate' | 'merged'
+
+const NO_DATE = 'no-date'
+const FROM_RECEIPTS: TrailState = { trail: [{ label: 'Receipts', to: '/receipts' }] }
 
 export function ReceiptsListPage() {
   const { receipts, loading, error, refresh } = useReceipts()
@@ -24,35 +27,48 @@ export function ReceiptsListPage() {
   const { session } = useAuth()
   const [searchParams] = useSearchParams()
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<FilterKey>('all')
-  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('everyone')
-  // Auto-imported receipts nobody has confirmed yet. These are the reason the
-  // banner exists: they were parsed by an LLM unattended, so amounts and dates
-  // can be wrong and the user needs a nudge to look. Pre-set by the "N to
-  // review" link on the Home landing page (?filter=pending), so tapping it
-  // lands here already filtered instead of requiring a second tap.
-  const [onlyUnreviewed, setOnlyUnreviewed] = useState(() => searchParams.get('filter') === 'pending')
+  // "To review" is pre-set by Home's tile (?filter=pending), so tapping it
+  // lands here already filtered instead of needing a second tap.
+  const [filters, setFilters] = useState<Set<FilterKey>>(
+    () => new Set(searchParams.get('filter') === 'pending' ? ['review'] : [])
+  )
   const [clearing, setClearing] = useState(false)
-  const [onlyMerged, setOnlyMerged] = useState(false)
   // Set by AddReceiptPage when a save folded into an existing receipt rather
   // than creating a new one — otherwise that merge is invisible.
   const location = useLocation()
   const mergedInto = (location.state as { mergedInto?: { id: string; merchant: string | null } } | null)?.mergedInto ?? null
   const [mergeNoticeDismissed, setMergeNoticeDismissed] = useState(false)
 
+  // Auto-imported receipts nobody has confirmed yet: parsed by an LLM
+  // unattended, so amounts and dates can be wrong.
   const unreviewed = useMemo(() => receipts.filter(needsReview), [receipts])
-  // Receipts the duplicate guard folded a second source into (e.g. an email
-  // scan enriching an SMS-created receipt) instead of creating a duplicate —
-  // surfaced here so merge activity is visible even when the merge landed on
-  // an already-reviewed receipt and never shows up in the banner above.
-  const merged = useMemo(() => receipts.filter(hasMergedSources), [receipts])
+  // Receipts the duplicate guard folded a second source into, instead of
+  // creating a duplicate.
+  const mergedCount = useMemo(() => receipts.filter(hasMergedSources).length, [receipts])
+  const hasUndated = useMemo(() => receipts.some((r) => dayKey(r.date) === null), [receipts])
+
+  function toggle(key: FilterKey) {
+    setFilters((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      // A receipt can't be both recent and undated; picking one drops the other.
+      if (key === 'last30') next.delete('noDate')
+      if (key === 'noDate') next.delete('last30')
+      return next
+    })
+  }
 
   async function markAllReviewed() {
     if (!session?.userId || unreviewed.length === 0) return
     setClearing(true)
     try {
       await markReceiptsReviewed(unreviewed.map((r) => r.id), session.userId)
-      setOnlyUnreviewed(false)
+      setFilters((prev) => {
+        const next = new Set(prev)
+        next.delete('review')
+        return next
+      })
       await refresh()
     } finally {
       setClearing(false)
@@ -62,192 +78,156 @@ export function ReceiptsListPage() {
   const filtered = useMemo(() => {
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
     return receipts.filter((r) => {
-      if (onlyUnreviewed && !needsReview(r)) return false
-      if (onlyMerged && !hasMergedSources(r)) return false
-      if (ownerFilter === 'mine' && r.userId !== session?.userId) return false
-      if (filter === 'last30') {
+      if (filters.has('review') && !needsReview(r)) return false
+      if (filters.has('merged') && !hasMergedSources(r)) return false
+      if (filters.has('mine') && r.userId !== session?.userId) return false
+      if (filters.has('last30')) {
         if (!r.date) return false
         const t = new Date(r.date).getTime()
         if (Number.isNaN(t) || t < thirtyDaysAgo) return false
-      } else if (filter === 'noDate') {
-        if (r.date) return false
       }
+      if (filters.has('noDate') && r.date) return false
       return receiptMatches(r, query)
     })
-  }, [receipts, filter, query, ownerFilter, session?.userId, onlyUnreviewed, onlyMerged])
+  }, [receipts, filters, query, session?.userId])
+
+  // Already newest-first from the provider, so consecutive receipts with the
+  // same day form the groups; undated ones collect in one group at the end.
+  const groups = useMemo(() => {
+    const list: { key: string; rows: Receipt[]; spend: number }[] = []
+    const undated: Receipt[] = []
+    for (const r of filtered) {
+      const key = dayKey(r.date)
+      if (!key) {
+        undated.push(r)
+        continue
+      }
+      let group = list[list.length - 1]
+      if (!group || group.key !== key) {
+        group = { key, rows: [], spend: 0 }
+        list.push(group)
+      }
+      group.rows.push(r)
+      if (isExpenseReceipt(r)) group.spend += reportingTotal(r) ?? 0
+    }
+    if (undated.length > 0) {
+      list.push({
+        key: NO_DATE,
+        rows: undated,
+        spend: undated.filter(isExpenseReceipt).reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0)
+      })
+    }
+    return list
+  }, [filtered])
 
   const totalSpend = useMemo(
     () => filtered.filter(isExpenseReceipt).reduce((sum, r) => sum + (reportingTotal(r) ?? 0), 0),
     [filtered]
   )
-
-  function formatMoney(amount: number) {
-    try {
-      return new Intl.NumberFormat(undefined, { style: 'currency', currency: defaultCurrency }).format(amount)
-    } catch {
-      return `${defaultCurrency} ${amount.toFixed(2)}`
-    }
-  }
+  const narrowed = filters.size > 0 || query.trim() !== ''
 
   return (
-    <div className="px-4 pt-4">
-      <PageHeader
-        title="Receipts"
-        backTo="/"
-        action={
-          <button
-            onClick={() => refresh()}
-            className="shrink-0 px-1 text-sm font-medium text-accent-700 dark:text-accent-400"
-            aria-label="Refresh"
-          >
-            Refresh
-          </button>
-        }
-      />
+    <div className="flex flex-col gap-3.5 px-4 pt-5 pb-6">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="font-display text-[30px] leading-none font-bold tracking-tight text-ink">Receipts</h1>
+        <button
+          type="button"
+          onClick={() => refresh()}
+          aria-label="Refresh"
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-ink active:bg-card-2"
+        >
+          <Icon name="refresh" size={18} />
+        </button>
+      </div>
 
-      {unreviewed.length > 0 && (
-        <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 dark:border-amber-700/60 dark:bg-amber-950/40">
-          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-            {unreviewed.length} new receipt{unreviewed.length === 1 ? '' : 's'} imported automatically
-          </p>
-          <p className="mt-0.5 text-xs text-amber-800 dark:text-amber-300/80">
-            Read from your SMS alerts and email. Check the amounts and dates are right.
-          </p>
-          <div className="mt-2 flex gap-2">
-            <button
-              onClick={() => { setOnlyUnreviewed((v) => !v); setOnlyMerged(false) }}
-              className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white"
-            >
-              {onlyUnreviewed ? 'Show all' : 'Review them'}
-            </button>
-            <button
-              onClick={markAllReviewed}
-              disabled={clearing}
-              className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-amber-900 disabled:opacity-60 dark:bg-neutral-900 dark:text-amber-200"
-            >
-              {clearing ? 'Marking…' : 'Mark all checked'}
-            </button>
-          </div>
-        </div>
-      )}
+      <label className="flex min-h-[52px] items-center gap-2.5 rounded-full bg-card px-4 focus-within:ring-2 focus-within:ring-accent">
+        <Icon name="search" size={18} className="shrink-0 text-muted" />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search merchant, item, amount, card…"
+          aria-label="Search receipts"
+          className="h-[52px] min-w-0 flex-1 bg-transparent text-base outline-none"
+        />
+      </label>
+
+      <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4" role="group" aria-label="Filters">
+        <Chip active={filters.size === 0} onClick={() => setFilters(new Set())}>All</Chip>
+        {unreviewed.length > 0 && (
+          <Chip active={filters.has('review')} onClick={() => toggle('review')}>To review · {unreviewed.length}</Chip>
+        )}
+        <Chip active={filters.has('mine')} onClick={() => toggle('mine')}>Mine</Chip>
+        <Chip active={filters.has('last30')} onClick={() => toggle('last30')}>Last 30 days</Chip>
+        {mergedCount > 0 && (
+          <Chip active={filters.has('merged')} onClick={() => toggle('merged')}>Merged · {mergedCount}</Chip>
+        )}
+        {hasUndated && <Chip active={filters.has('noDate')} onClick={() => toggle('noDate')}>No date</Chip>}
+      </div>
 
       {mergedInto && !mergeNoticeDismissed && (
-        <div className="mt-3 rounded-xl border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-700/60 dark:bg-emerald-950/30">
-          <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
-            🔗 Saved into your existing {mergedInto.merchant ? `“${mergedInto.merchant}” ` : ''}receipt
+        <Notice tone="ok">
+          <p className="font-medium">
+            Saved into your existing {mergedInto.merchant ? `“${mergedInto.merchant}” ` : ''}receipt
           </p>
-          <p className="mt-0.5 text-xs text-emerald-800 dark:text-emerald-300/80">
+          <p className="mt-0.5 text-[13px] opacity-90">
             It matched a receipt already imported from SMS or email for the same charge, so the details were combined instead of creating a duplicate.
           </p>
-          <div className="mt-2 flex gap-2">
-            <Link
-              to={`/receipts/${mergedInto.id}/edit`}
-              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white"
-            >
-              View it
-            </Link>
-            <button
-              onClick={() => setMergeNoticeDismissed(true)}
-              className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-emerald-900 dark:bg-neutral-900 dark:text-emerald-200"
-            >
-              Dismiss
-            </button>
+          <div className="mt-3 flex gap-2">
+            <Link to={`/receipts/${mergedInto.id}`} state={FROM_RECEIPTS} className={btn.inset}>View it</Link>
+            <button type="button" onClick={() => setMergeNoticeDismissed(true)} className={btn.inset}>Dismiss</button>
           </div>
-        </div>
+        </Notice>
       )}
 
-      {merged.length > 0 && (
-        <div className="mt-3 rounded-xl border border-accent-300 bg-accent-50 p-3 dark:border-accent-700/60 dark:bg-accent-950/30">
-          <p className="text-sm font-medium text-accent-900 dark:text-accent-200">
-            🔗 {merged.length} receipt{merged.length === 1 ? '' : 's'} merged from multiple sources
+      {filters.has('review') && unreviewed.length > 0 && (
+        <div className="rounded-3xl bg-card p-[18px]">
+          <p className="text-[15px] font-medium text-ink">
+            {plural(unreviewed.length, 'receipt')} imported automatically
           </p>
-          <p className="mt-0.5 text-xs text-accent-800 dark:text-accent-300/80">
-            A later SMS, email, or photo for the same charge was combined into the original receipt instead of creating a duplicate.
+          <p className="mt-1 text-[13px] text-muted">
+            Read from your SMS alerts and email with nobody watching. Check the amounts and dates, or swipe a row left to approve it.
           </p>
-          <button
-            onClick={() => { setOnlyMerged((v) => !v); setOnlyUnreviewed(false) }}
-            className="mt-2 rounded-lg bg-accent-700 px-3 py-1.5 text-sm font-medium text-white"
-          >
-            {onlyMerged ? 'Show all' : 'Show them'}
+          <button type="button" onClick={markAllReviewed} disabled={clearing} className={`${btn.inset} mt-3`}>
+            <Icon name="check" size={16} />
+            {clearing ? 'Marking…' : 'Mark all checked'}
           </button>
         </div>
       )}
 
-      {/* This month's overview now lives on the Home landing page — these two
-          reflect the current search/filter, which the landing page can't. */}
-      <div className="mt-3 flex gap-2">
-        <StatTile label="Shown" value={formatMoney(totalSpend)} />
-        <StatTile label="Receipts" value={String(filtered.length)} />
-      </div>
-
-      <input
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search merchant, item, amount, card…"
-        className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900"
-      />
-
-      <div className="mt-3 flex gap-2">
-        {([
-          { key: 'everyone', label: 'Everyone' },
-          { key: 'mine', label: 'Only mine' }
-        ] as { key: OwnerFilter; label: string }[]).map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setOwnerFilter(f.key)}
-            className={`flex-1 rounded-full px-3 py-1.5 text-sm font-medium ${
-              ownerFilter === f.key
-                ? 'bg-neutral-800 text-white dark:bg-neutral-200 dark:text-neutral-900'
-                : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-medium ${
-              filter === f.key
-                ? 'bg-accent-700 text-white'
-                : 'bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      {error && (
-        <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
-          {error}
-        </div>
-      )}
+      {error && <Notice tone="error">{error}</Notice>}
 
       {loading ? (
-        <div className="mt-8 text-center text-sm text-neutral-500">Loading…</div>
+        <EmptyState>Loading…</EmptyState>
       ) : filtered.length === 0 ? (
-        <div className="mt-12 flex flex-col items-center gap-3 text-center">
-          <p className="text-neutral-500 dark:text-neutral-400">
-            {receipts.length === 0 ? "No receipts yet." : 'No receipts match your search.'}
-          </p>
-          {receipts.length === 0 && (
-            <Link to="/add" className="rounded-lg bg-accent-700 px-4 py-2 text-sm font-semibold text-white">
-              Add your first receipt
-            </Link>
-          )}
+        <div className="flex flex-col items-center gap-4">
+          <EmptyState>{receipts.length === 0 ? 'No receipts yet.' : 'No receipts match.'}</EmptyState>
+          {receipts.length === 0 && <Link to="/add" className={btn.primary}>Add your first receipt</Link>}
         </div>
       ) : (
-        <div className="mt-3 flex flex-col gap-2 pb-6">
-          {filtered.map((r, i) => (
-            <ReceiptCard key={r.id} receipt={r} showSwipeHint={i === 0} />
+        <>
+          {narrowed && (
+            <p className="px-1 text-[13px] text-muted">
+              {plural(filtered.length, 'receipt')} · {formatMoney(totalSpend, defaultCurrency, { cents: true })} spent
+            </p>
+          )}
+          {groups.map((group) => (
+            <section key={group.key} className="flex flex-col gap-1.5">
+              <div className="flex items-baseline justify-between px-1 pt-1 text-[13px] text-muted">
+                <h2 className="font-medium">{group.key === NO_DATE ? 'No date' : dayLabel(group.key)}</h2>
+                <span>{formatMoney(group.spend, defaultCurrency, { cents: true })}</span>
+              </div>
+              {group.rows.map((r) => (
+                <ReceiptCard
+                  key={r.id}
+                  receipt={r}
+                  showDate={false}
+                  linkState={FROM_RECEIPTS}
+                />
+              ))}
+            </section>
           ))}
-        </div>
+        </>
       )}
     </div>
   )

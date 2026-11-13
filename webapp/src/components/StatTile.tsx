@@ -1,11 +1,27 @@
-export function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex-1 rounded-xl bg-neutral-100 px-3 py-3 dark:bg-neutral-800">
-      {/* Sentence case, not uppercase: small all-caps text loses the word shapes
-          that make a label readable at a glance. neutral-600/300 rather than
-          500/400 so the label clears 7:1 on its own tinted background. */}
-      <div className="text-xs font-medium text-neutral-600 dark:text-neutral-300">{label}</div>
-      <div className="mt-1 truncate text-xl font-semibold text-neutral-900 dark:text-neutral-50">{value}</div>
-    </div>
+import { Link } from 'react-router-dom'
+
+interface StatTileProps {
+  label: string
+  value: string
+  /** One line of context under the figure. */
+  hint?: string
+  /** Where tapping the figure drills to. Every stat in the app leads somewhere. */
+  to?: string
+  state?: unknown
+}
+
+export function StatTile({ label, value, hint, to, state }: StatTileProps) {
+  const body = (
+    <>
+      <div className="text-sm text-muted">{label}</div>
+      <div className="mt-2 truncate font-display text-[30px] leading-none font-semibold tracking-tight text-ink">{value}</div>
+      {hint && <div className="mt-2 text-[13px] text-muted">{hint}</div>}
+    </>
+  )
+  const cls = 'block min-w-0 flex-1 rounded-3xl bg-card p-[18px]'
+  return to ? (
+    <Link to={to} state={state} className={`${cls} active:bg-card-2`}>{body}</Link>
+  ) : (
+    <div className={cls}>{body}</div>
   )
 }

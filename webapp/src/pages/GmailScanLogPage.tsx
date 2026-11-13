@@ -73,28 +73,28 @@ export function GmailScanLogPage() {
           entries.length > 0 ? (
             <button
               onClick={() => setConfirmingClear(true)}
-              className="shrink-0 px-1 text-sm font-medium text-red-600"
+              className="min-h-11 shrink-0 px-2 text-sm font-medium text-red-600 dark:text-red-400"
             >
               Clear
             </button>
           ) : undefined
         }
       />
-      <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+      <p className="mt-3 px-1 text-[15px] leading-relaxed text-muted">
         Emails the scanner found and read, but decided weren't a receipt — with why.
         Ordinary non-receipt mail isn't listed here at all; only the borderline cases.
       </p>
 
       {error && (
-        <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div className="mt-3 rounded-2xl bg-red-100 px-4 py-3 text-sm text-red-800 dark:bg-red-500/15 dark:text-red-200">
           {error}
         </div>
       )}
 
       {loading ? (
-        <p className="mt-4 text-sm text-neutral-500">Loading…</p>
+        <p className="mt-4 text-sm text-muted">Loading…</p>
       ) : entries.length === 0 ? (
-        <p className="mt-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-8 text-center text-sm text-muted">
           Nothing's been rejected recently. If an email you expected to see as a
           receipt is missing entirely, the scanner's search may never have found
           it — try again after the next scan, or check its subject line for
@@ -105,25 +105,25 @@ export function GmailScanLogPage() {
           {entries.map((e) => (
             <div
               key={e.id}
-              className="rounded-lg border border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900"
+              className="rounded-2xl bg-card px-4 py-3.5"
             >
               <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 truncate text-sm font-medium text-neutral-900 dark:text-neutral-50">
+                <p className="min-w-0 truncate text-sm font-medium text-ink">
                   {e.subject || '(no subject)'}
                 </p>
                 <button
                   onClick={() => handleRetry(e.id)}
                   disabled={retryingId === e.id}
-                  className="shrink-0 text-xs font-medium text-accent-700 disabled:opacity-60 dark:text-accent-400"
+                  className="-my-2 flex min-h-11 shrink-0 items-center rounded-full bg-card-2 px-3.5 text-[13px] font-semibold text-ink disabled:opacity-60"
                 >
                   {retryingId === e.id ? 'Retrying…' : 'Retry'}
                 </button>
               </div>
               {e.sender && (
-                <p className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400">{e.sender}</p>
+                <p className="mt-0.5 truncate text-xs text-muted">{e.sender}</p>
               )}
-              <p className="mt-1.5 text-sm text-amber-800 dark:text-amber-300">{e.reason}</p>
-              <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
+              <p className="mt-1.5 text-sm text-amber-800 dark:text-amber-200">{e.reason}</p>
+              <p className="mt-1 text-xs text-muted">
                 {formatWhen(e.emailDate) ? `Email: ${formatWhen(e.emailDate)} · ` : ''}
                 Scanned {formatWhen(e.scannedAt)}
                 {/* MAX_PARSE_ATTEMPTS in scan-gmail/index.ts — keep in sync. */}

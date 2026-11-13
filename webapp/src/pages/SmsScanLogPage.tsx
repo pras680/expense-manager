@@ -95,14 +95,14 @@ export function SmsScanLogPage() {
           entries.length > 0 ? (
             <button
               onClick={() => setConfirmingClear(true)}
-              className="shrink-0 px-1 text-sm font-medium text-red-600"
+              className="min-h-11 shrink-0 px-2 text-sm font-medium text-red-600 dark:text-red-400"
             >
               Clear
             </button>
           ) : undefined
         }
       />
-      <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+      <p className="mt-3 px-1 text-[15px] leading-relaxed text-muted">
         Messages the importer received but didn't turn into a receipt — with why.
         Successfully imported messages aren't listed here; only the ones worth a
         second look, like a message the parser couldn't make sense of.
@@ -112,22 +112,22 @@ export function SmsScanLogPage() {
         <button
           onClick={handleRetryAll}
           disabled={retryingAll}
-          className="mt-3 w-full rounded-lg bg-accent-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="mt-3 w-full rounded-full bg-accent text-sm font-semibold text-on-accent disabled:opacity-60 min-h-12"
         >
           {retryingAll ? 'Retrying all…' : `Retry all (${entries.length})`}
         </button>
       )}
 
       {error && (
-        <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <div className="mt-3 rounded-2xl bg-red-100 px-4 py-3 text-sm text-red-800 dark:bg-red-500/15 dark:text-red-200">
           {error}
         </div>
       )}
 
       {loading ? (
-        <p className="mt-4 text-sm text-neutral-500">Loading…</p>
+        <p className="mt-4 text-sm text-muted">Loading…</p>
       ) : entries.length === 0 ? (
-        <p className="mt-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="mt-8 text-center text-sm text-muted">
           Nothing's been skipped or failed recently.
         </p>
       ) : (
@@ -135,27 +135,27 @@ export function SmsScanLogPage() {
           {entries.map((e) => (
             <div
               key={e.id}
-              className="rounded-lg border border-neutral-200 bg-white px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900"
+              className="rounded-2xl bg-card px-4 py-3.5"
             >
               <div className="flex items-start justify-between gap-3">
-                <p className="min-w-0 text-sm font-medium text-neutral-900 dark:text-neutral-50">
+                <p className="min-w-0 text-sm font-medium text-ink">
                   {summarize(e.body) || '(empty message)'}
                 </p>
                 <button
                   onClick={() => handleRetry(e.id)}
                   disabled={retryingId === e.id}
-                  className="shrink-0 text-xs font-medium text-accent-700 disabled:opacity-60 dark:text-accent-400"
+                  className="-my-2 flex min-h-11 shrink-0 items-center rounded-full bg-card-2 px-3.5 text-[13px] font-semibold text-ink disabled:opacity-60"
                 >
                   {retryingId === e.id ? 'Retrying…' : 'Retry'}
                 </button>
               </div>
               {e.sender && (
-                <p className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400">{e.sender}</p>
+                <p className="mt-0.5 truncate text-xs text-muted">{e.sender}</p>
               )}
-              <p className="mt-1.5 text-sm text-amber-800 dark:text-amber-300">
+              <p className="mt-1.5 text-sm text-amber-800 dark:text-amber-200">
                 {e.reason || (e.status === 'skipped' ? "Doesn't look like a transaction" : 'Failed')}
               </p>
-              <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
+              <p className="mt-1 text-xs text-muted">
                 Received {formatWhen(e.receivedAt)}
                 {/* MAX_RETRIES in process-sms-inbox/index.ts — keep in sync. */}
                 {e.status === 'failed' && e.retryCount >= 3
