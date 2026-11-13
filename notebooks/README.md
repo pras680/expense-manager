@@ -53,3 +53,22 @@ jupyter lab starter.ipynb
 `.env` (gitignored) holds `DATABASE_URL` (DB password, for reads) and
 optionally `SUPABASE_SERVICE_ROLE_KEY` (only needed to call an edge function
 directly). Never put either in a cell, a commit, or a chat message.
+
+## Jev feasibility stub (`jev_feasibility.py`)
+
+Tests whether TypeSafe AI's Jev classifies our receipts well enough for
+ADR-0003 (category review flags) and ADR-0001 (merchant tags). Read-only on
+the database; results go to `jev_out/` (gitignored, contains real merchant names).
+
+```bash
+source .venv/bin/activate
+python jev_feasibility.py probe                         # 1 call: see Jev's raw response shape first
+python jev_feasibility.py categories --dry-run --limit 3 # see exactly what would be sent
+python jev_feasibility.py categories --limit 200        # accuracy, calibration, flag simulation
+python jev_feasibility.py tags --limit 60               # origin / venue_type CSV for you to mark
+python jev_feasibility.py tags-score                    # score it after marking expected_* columns
+python jev_feasibility.py rescore                       # re-parse saved responses, no API calls
+```
+
+By default only merchant, source and line items are sent; add
+`--include-raw-text` to also send the first 1,200 characters of receipt text.
